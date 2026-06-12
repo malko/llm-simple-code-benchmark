@@ -7,6 +7,7 @@ import { renderRunMonitor } from './pages/run-monitor.js';
 import { renderResultsBrowser } from './pages/results-browser.js';
 import { renderResultsGraph } from './pages/results-graph.js';
 import { renderDashboard } from './pages/dashboard.js';
+import { renderSettings } from './pages/settings.js';
 
 router.on('/', renderDashboard);
 router.on('/tests', renderTestList);
@@ -15,6 +16,7 @@ router.on('/run', renderRunLauncher);
 router.on('/run/:id', renderRunMonitor);
 router.on('/results', renderResultsBrowser);
 router.on('/results/graph', renderResultsGraph);
+router.on('/settings', renderSettings);
 
 async function checkStatus() {
   const serverDot = document.getElementById('server-status')!;

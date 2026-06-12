@@ -133,6 +133,11 @@ export interface LlamaChatResponse {
   };
 }
 
+export interface Settings {
+  llamaServerUrl: string;
+  llamaApiKey: string;
+}
+
 export interface LlamaModelEntry {
   id: string;
   path?: string;

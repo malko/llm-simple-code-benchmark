@@ -51,4 +51,17 @@ export const api = {
   getResultFiles: (runId: string, testName: string, modelId: string) =>
     request<{ data: string[] }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/files`),
   getStats: () => request<Record<string, number>>('/results/stats'),
+
+  // Settings
+  getSettings: () => request<{ llamaServerUrl: string; llamaApiKey: string }>('/settings'),
+  saveSettings: (settings: { llamaServerUrl: string; llamaApiKey: string }) =>
+    request<{ success: boolean }>('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+  testSettings: (settings: { llamaServerUrl: string; llamaApiKey: string }) =>
+    request<{ reachable: boolean }>('/settings/test', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
 };

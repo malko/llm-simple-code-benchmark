@@ -1,10 +1,25 @@
-import { LlamaChatResponse, ChatMessage, ToolDefinition } from '../types.js';
+import { LlamaChatResponse, ChatMessage, ToolDefinition, Settings } from '../types.js';
 
-const LLAMA_SERVER_URL = process.env.LLAMA_SERVER_URL || 'http://127.0.0.1:8080';
+const ENV_URL = process.env.LLAMA_SERVER_URL || 'http://127.0.0.1:8080';
+const ENV_KEY = process.env.LLAMA_API_KEY || '';
+
+function resolveUrl(settings?: Pick<Settings, 'llamaServerUrl'>): string {
+  return settings?.llamaServerUrl?.trim() || ENV_URL;
+}
+
+function resolveHeaders(settings?: Pick<Settings, 'llamaApiKey'>): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const key = settings?.llamaApiKey?.trim() || ENV_KEY;
+  if (key) headers['Authorization'] = `Bearer ${key}`;
+  return headers;
+}
 
 export const llamaclient = {
-  async listModels(): Promise<{ id: string; status: string; meta?: Record<string, unknown> }[]> {
-    const res = await fetch(`${LLAMA_SERVER_URL}/models`, {
+  async listModels(settings?: Settings): Promise<{ id: string; status: string; meta?: Record<string, unknown> }[]> {
+    const url = resolveUrl(settings);
+    const headers = resolveHeaders(settings);
+    const res = await fetch(`${url}/models`, {
+      headers,
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`Failed to list models: ${res.status}`);
@@ -31,8 +46,12 @@ export const llamaclient = {
       repeatPenalty: number;
       seed: number;
     },
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    settings?: Settings,
   ): Promise<LlamaChatResponse> {
+    const url = resolveUrl(settings);
+    const headers = resolveHeaders(settings);
+
     const body: Record<string, unknown> = {
       model: modelId,
       messages,
@@ -51,9 +70,9 @@ export const llamaclient = {
       body.tool_choice = 'auto';
     }
 
-    const res = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+    const res = await fetch(`${url}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
       signal: signal || AbortSignal.timeout(30000),
     });
@@ -66,9 +85,42 @@ export const llamaclient = {
     return res.json();
   },
 
-  async health(): Promise<boolean> {
+  async loadModel(modelId: string, settings?: Settings): Promise<void> {
+    const url = resolveUrl(settings);
+    const headers = resolveHeaders(settings);
+    const res = await fetch(`${url}/models/load`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: modelId }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Failed to load model "${modelId}": ${res.status} ${text}`);
+    }
+  },
+
+  async unloadModel(modelId: string, settings?: Settings): Promise<void> {
+    const url = resolveUrl(settings);
+    const headers = resolveHeaders(settings);
+    const res = await fetch(`${url}/models/unload`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: modelId }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Failed to unload model "${modelId}": ${res.status} ${text}`);
+    }
+  },
+
+  async health(settings?: Settings): Promise<boolean> {
     try {
-      const res = await fetch(`${LLAMA_SERVER_URL}/health`, {
+      const url = resolveUrl(settings);
+      const headers = resolveHeaders(settings);
+      const res = await fetch(`${url}/health`, {
+        headers,
         signal: AbortSignal.timeout(3000),
       });
       return res.ok;

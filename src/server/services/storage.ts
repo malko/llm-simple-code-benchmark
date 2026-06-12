@@ -1,11 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { Run, TestResult } from '../types.js';
+import { Run, TestResult, Settings } from '../types.js';
 
 const TESTS_DIR = process.env.TESTS_DIR || '/app/tests';
 const OUTPUT_DIR = process.env.OUTPUT_DIR || '/app/output';
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 const RUNS_FILE = path.join(DATA_DIR, 'runs.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 function ensureDir(dir: string): Promise<void> {
   return fs.mkdir(dir, { recursive: true }).then(() => {});
@@ -129,5 +130,18 @@ export const storage = {
     } catch {
       return [];
     }
+  },
+
+  // Settings
+  async getSettings(): Promise<Settings> {
+    return readJSON<Settings>(SETTINGS_FILE, {
+      llamaServerUrl: '',
+      llamaApiKey: '',
+    });
+  },
+
+  async saveSettings(settings: Settings): Promise<void> {
+    await ensureDir(DATA_DIR);
+    await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
   },
 };

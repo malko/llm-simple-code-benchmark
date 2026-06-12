@@ -6,6 +6,7 @@ import { testsRouter } from './routes/tests.js';
 import { modelsRouter } from './routes/models.js';
 import { runsRouter } from './routes/runs.js';
 import { resultsRouter } from './routes/results.js';
+import { settingsRouter } from './routes/settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +20,7 @@ app.use('/api/tests', testsRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/runs', runsRouter);
 app.use('/api/results', resultsRouter);
+app.use('/api/settings', settingsRouter);
 
 app.use(express.static(CLIENT_DIR));
 

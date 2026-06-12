@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import {
   Run, RunConfig, TestResult, TestStats, ChatMessage,
-  ToolCall, ToolDefinition, RunEvent, TestStats as TestStatsType,
+  ToolCall, ToolDefinition, RunEvent, Settings, TestStats as TestStatsType,
 } from '../types.js';
 import { llamaclient } from './llamaclient.js';
 import { toolDefinitions, toolExecutor } from './tool-executor.js';
@@ -73,8 +73,24 @@ export class RunEmitter extends EventEmitter {
 export const runEmitter = new RunEmitter();
 const activeRuns = new Map<string, AbortController>();
 
-async function loadRunMeta(id: string): Promise<Run | null> {
-  return storage.getRun(id);
+async function waitForModelReady(modelId: string, settings: Settings, signal: AbortSignal, timeoutMs = 120000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw new Error('Run cancelled');
+    const models = await llamaclient.listModels(settings);
+    const found = models.find(m => m.id === modelId);
+    if (found?.status === 'loaded') return;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for model "${modelId}" to load`);
+}
+
+async function switchToModel(modelId: string, settings: Settings, signal: AbortSignal): Promise<void> {
+  const models = await llamaclient.listModels(settings);
+  const others = models.filter(m => m.id !== modelId && m.status === 'loaded');
+  await Promise.all(others.map(m => llamaclient.unloadModel(m.id, settings).catch(() => {})));
+  await llamaclient.loadModel(modelId, settings);
+  await waitForModelReady(modelId, settings, signal);
 }
 
 async function chatLoop(
@@ -84,6 +100,7 @@ async function chatLoop(
   outputDir: string,
   params: RunConfig['parameters'],
   signal: AbortSignal,
+  settings?: Settings,
 ): Promise<{ messages: ChatMessage[]; stats: TestStatsType }> {
   const messages: ChatMessage[] = [
     {
@@ -112,7 +129,7 @@ Output directory: ${outputDir}`,
   for (let i = 0; i < params.maxTurns; i++) {
     if (signal.aborted) throw new Error('Run cancelled');
 
-    const res = await llamaclient.chat(modelId, messages, tools, llmParams, signal);
+    const res = await llamaclient.chat(modelId, messages, tools, llmParams, signal, settings);
     turnCount++;
 
     if (res.usage) cumulativeUsage = res.usage;
@@ -213,6 +230,7 @@ export const runner = {
 
   async execute(runId: string, config: RunConfig, signal: AbortSignal): Promise<void> {
     try {
+      const settings = await storage.getSettings();
       const totalSteps = config.modelIds.length * config.testNames.length;
       let completedSteps = 0;
 
@@ -223,6 +241,17 @@ export const runner = {
         runEmitter.emitModelSwitch(runId, {
           modelId, modelIndex: mi, totalModels: config.modelIds.length,
         });
+
+        try {
+          await switchToModel(modelId, settings, signal);
+        } catch (err) {
+          for (let ti = 0; ti < config.testNames.length; ti++) {
+            const testName = config.testNames[ti];
+            runEmitter.emitError(runId, { testName, modelId, error: `Model switch failed: ${(err as Error).message}` });
+            completedSteps++;
+          }
+          continue;
+        }
 
         for (let ti = 0; ti < config.testNames.length; ti++) {
           const testName = config.testNames[ti];
@@ -256,7 +285,7 @@ export const runner = {
 
           try {
             const { messages, stats } = await chatLoop(
-              modelId, test.prompt, toolDefinitions, outputDir, config.parameters, signal,
+              modelId, test.prompt, toolDefinitions, outputDir, config.parameters, signal, settings,
             );
 
             result.stats = stats;
