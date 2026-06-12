@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - LLAMA_SERVER_URL=${LLAMA_SERVER_URL:-http://host.docker.internal:8080}
+      - PORT=${PORT:-3000}
+      - NODE_ENV=production
+    volumes:
+      - ./tests:/app/tests
+      - ./output:/app/output
+      - ./data:/app/data
+    restart: unless-stopped

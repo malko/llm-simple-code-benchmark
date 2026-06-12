@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Code Bench</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav id="nav">
+    <div class="nav-brand">LLM Code Bench</div>
+    <div class="nav-links">
+      <a href="#/" data-nav>Dashboard</a>
+      <a href="#/tests" data-nav>Tests</a>
+      <a href="#/run" data-nav>Run</a>
+      <a href="#/results" data-nav>Results</a>
+      <a href="#/results/graph" data-nav>Graphs</a>
+    </div>
+    <div class="nav-status">
+      <span id="server-status" class="status-dot offline"></span>
+      <span id="llm-status" class="status-dot offline"></span>
+    </div>
+  </nav>
+  <main id="app"></main>
+  <script src="main.js"></script>
+</body>
+</html>

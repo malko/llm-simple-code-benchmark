@@ -1,0 +1,54 @@
+const BASE = '/api';
+
+async function request<T>(url: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(BASE + url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export const api = {
+  // Tests
+  listTests: () => request<{ data: { name: string; hasPrompt: boolean; hasScript: boolean }[] }>('/tests'),
+  getTest: (name: string) => request<{ name: string; prompt: string; script: string }>(`/tests/${encodeURIComponent(name)}`),
+  saveTest: (name: string, prompt: string, script: string) =>
+    request<{ success: boolean }>(`/tests/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ prompt, script }),
+    }),
+  deleteTest: (name: string) =>
+    request<{ success: boolean }>(`/tests/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // Models
+  listModels: () => request<{ data: { id: string; status: string; meta?: Record<string, unknown> }[] }>('/models'),
+  health: () => request<{ status: string }>('/models/health'),
+
+  // Runs
+  listRuns: () => request<{ data: { id: string; name: string; status: string; createdAt: string; progress: Record<string, unknown>; modelCount: number; testCount: number; resultCount: number }[] }>('/runs'),
+  getRun: (id: string) => request<Record<string, unknown>>(`/runs/${encodeURIComponent(id)}`),
+  createRun: (config: Record<string, unknown>) =>
+    request<Record<string, unknown>>('/runs', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+  cancelRun: (id: string) =>
+    request<{ success: boolean }>(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  runEvents: (id: string): EventSource =>
+    new EventSource(`${BASE}/runs/${encodeURIComponent(id)}/events`),
+
+  // Results
+  listResults: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return request<{ data: Record<string, unknown>[] }>('/results' + qs);
+  },
+  getResult: (runId: string, testName: string, modelId: string) =>
+    request<Record<string, unknown>>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}`),
+  getResultFiles: (runId: string, testName: string, modelId: string) =>
+    request<{ data: string[] }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/files`),
+  getStats: () => request<Record<string, number>>('/results/stats'),
+};
