@@ -10,7 +10,8 @@ class Router {
   }
 
   async navigate(url?: string): Promise<void> {
-    const hash = (url || location.hash.slice(1) || '/');
+    const full = (url || location.hash.slice(1) || '/');
+    const hash = full.split('?')[0];
     for (const { pattern, keys, page } of this.routes) {
       const match = hash.match(pattern);
       if (match) {

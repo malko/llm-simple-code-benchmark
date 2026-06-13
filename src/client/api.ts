@@ -52,6 +52,8 @@ export const api = {
     request<Record<string, unknown>>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}`),
   getResultFiles: (runId: string, testName: string, modelId: string) =>
     request<{ data: string[] }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/files`),
+  getResultFileContent: (runId: string, testName: string, modelId: string, filePath: string) =>
+    request<{ path: string; content: string }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/file?path=${encodeURIComponent(filePath)}`),
   getStats: () => request<Record<string, number>>('/results/stats'),
 
   // Settings

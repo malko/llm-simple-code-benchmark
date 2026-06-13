@@ -41,6 +41,21 @@ resultsRouter.get('/:runId/:testName/:modelId/files', async (req: Request, res: 
   res.json({ data: files });
 });
 
+resultsRouter.get('/:runId/:testName/:modelId/file', async (req: Request, res: Response) => {
+  const { runId, testName, modelId } = req.params;
+  const filePath = req.query.path;
+  if (typeof filePath !== 'string' || !filePath) {
+    res.status(400).json({ error: 'path query parameter is required' });
+    return;
+  }
+  const content = await storage.getOutputFileContent(runId, testName, modelId, filePath);
+  if (content === null) {
+    res.status(404).json({ error: 'File not found' });
+    return;
+  }
+  res.json({ path: filePath, content });
+});
+
 resultsRouter.get('/stats', async (_req: Request, res: Response) => {
   const runs = await storage.listRuns();
   const stats = {

@@ -175,9 +175,22 @@ export const storage = {
     const dir = this.getTestOutputDir(runId, testName, modelId);
     try {
       const entries = await fs.readdir(dir, { recursive: true, withFileTypes: true });
-      return entries.filter(e => e.isFile()).map(e => path.join(e.parentPath, e.name));
+      return entries.filter(e => e.isFile()).map(e => path.relative(dir, path.join(e.parentPath, e.name)));
     } catch {
       return [];
+    }
+  },
+
+  async getOutputFileContent(runId: string, testName: string, modelId: string, filePath: string): Promise<string | null> {
+    const dir = path.resolve(this.getTestOutputDir(runId, testName, modelId));
+    const resolved = path.resolve(dir, filePath);
+    if (resolved !== dir && !resolved.startsWith(dir + path.sep)) return null;
+    try {
+      const stat = await fs.stat(resolved);
+      if (!stat.isFile()) return null;
+      return await fs.readFile(resolved, 'utf-8');
+    } catch {
+      return null;
     }
   },
 

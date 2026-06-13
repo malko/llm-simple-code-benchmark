@@ -1,7 +1,6 @@
 import { api } from '../api.js';
-import { Chart, registerables } from 'chart.js';
-
-Chart.register(...registerables);
+import { ResultRow } from '../components/result-types.js';
+import { renderComparisonCharts, RunParamInfo } from '../components/comparison-charts.js';
 
 export async function renderResultsGraph(): Promise<HTMLElement> {
   const container = document.createElement('div');
@@ -22,7 +21,7 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
             <button class="btn btn-primary" id="update-graph">Update Graph</button>
           </div>
         </div>
-        <p>Select runs to compare. Each dot represents a (model, test) result.</p>
+        <p>Select runs to compare. Same model run with different parameters across runs is shown as a separate series.</p>
         <div class="selector-list" id="run-selector" style="max-height:200px">
           ${runs.map(r => `
             <label class="selector-item">
@@ -33,9 +32,7 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
           `).join('')}
         </div>
       </div>
-      <div class="chart-container" style="min-height:400px">
-        <canvas id="graph-canvas"></canvas>
-      </div>
+      <div id="charts-target"></div>
     `;
 
     container.querySelector('#update-graph')?.addEventListener('click', () => updateGraph(container));
@@ -54,128 +51,30 @@ async function updateGraph(container: HTMLElement): Promise<void> {
   const checked = container.querySelectorAll('#run-selector input:checked');
   const runIds = Array.from(checked).map(c => (c as HTMLInputElement).value);
 
-  if (runIds.length === 0) return;
+  const target = container.querySelector('#charts-target') as HTMLElement;
+  if (!target) return;
+
+  if (runIds.length === 0) {
+    target.innerHTML = '<p class="text-muted">Select at least one run to compare.</p>';
+    return;
+  }
+
+  target.innerHTML = '<p class="text-muted">Loading...</p>';
 
   try {
-    const res = await api.listResults({ runId: runIds.join(',') });
-    const results = res.data as Record<string, unknown>[];
+    const [resultsRes, runDetails] = await Promise.all([
+      api.listResults({ runId: runIds.join(',') }),
+      Promise.all(runIds.map(id => api.getRun(id))),
+    ]);
 
-    const canvas = container.querySelector('#graph-canvas') as HTMLCanvasElement;
-    if (!canvas) return;
-
-    if (results.length === 0) {
-      canvas.style.display = 'none';
-      return;
-    }
-    canvas.style.display = '';
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const existingChart = (canvas as any).__chart;
-    if (existingChart) existingChart.destroy();
-
-    const labels: string[] = [];
-    const passedData: { x: number; y: number }[] = [];
-    const failedData: { x: number; y: number }[] = [];
-    const errorData: { x: number; y: number }[] = [];
-    const labelMap = new Map<string, number>();
-
-    for (const r of results) {
-      const speed = (r.stats as Record<string, number>)?.tokenGenerationSpeed ?? 0;
-      const shortName = ((r.modelId as string) || '').replace(/^.*[/:]/g, '').slice(0, 20);
-      const label = `${shortName} / ${r.testName}`;
-
-      if (!labelMap.has(label)) {
-        labelMap.set(label, labels.length);
-        labels.push(label);
-      }
-      const xi = labelMap.get(label)!;
-
-      if (r.status === 'passed') passedData.push({ x: xi, y: speed });
-      else if (r.status === 'failed') failedData.push({ x: xi, y: speed });
-      else errorData.push({ x: xi, y: speed });
-    }
-
-    (canvas as any).__chart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          {
-            label: 'Passed',
-            data: passedData,
-            backgroundColor: 'rgba(76, 175, 80, 0.7)',
-            borderColor: 'rgba(76, 175, 80, 1)',
-            borderWidth: 0,
-            pointRadius: 6,
-            pointBackgroundColor: 'rgba(76, 175, 80, 0.7)',
-          },
-          {
-            label: 'Failed',
-            data: failedData,
-            backgroundColor: 'rgba(244, 67, 54, 0.7)',
-            borderColor: 'rgba(244, 67, 54, 1)',
-            borderWidth: 0,
-            pointRadius: 6,
-            pointBackgroundColor: 'rgba(244, 67, 54, 0.7)',
-          },
-          {
-            label: 'Error',
-            data: errorData,
-            backgroundColor: 'rgba(255, 152, 0, 0.7)',
-            borderColor: 'rgba(255, 152, 0, 1)',
-            borderWidth: 0,
-            pointRadius: 6,
-            pointBackgroundColor: 'rgba(255, 152, 0, 0.7)',
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'top', labels: { color: '#eee' } },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const label = labels[ctx.dataIndex] || '';
-                return `${ctx.dataset.label}: ${label} — ${ctx.parsed.y.toFixed(1)} t/s`;
-              },
-            },
-          },
-        },
-        scales: {
-          x: {
-            title: { display: true, text: 'Model / Test', color: '#aaa' },
-            ticks: { color: '#aaa', maxRotation: 45 },
-            grid: { color: 'rgba(255,255,255,0.05)' },
-          },
-          y: {
-            title: { display: true, text: 'Token Generation Speed (t/s)', color: '#aaa' },
-            beginAtZero: true,
-            ticks: { color: '#aaa' },
-            grid: { color: 'rgba(255,255,255,0.05)' },
-          },
-        },
-        elements: {
-          point: {
-            hitRadius: 10,
-          },
-        },
-      },
-      plugins: [{
-        id: 'customCanvasBackgroundColor',
-        beforeDraw: (chart) => {
-          const ctx2 = chart.ctx;
-          ctx2.save();
-          ctx2.fillStyle = '#16213e';
-          ctx2.fillRect(0, 0, chart.width, chart.height);
-          ctx2.restore();
-        },
-      }],
+    const results = resultsRes.data as unknown as ResultRow[];
+    const runInfos: RunParamInfo[] = runDetails.filter(Boolean).map(run => {
+      const r = run as unknown as { id: string; name: string; config?: { parameters?: Record<string, unknown> } };
+      return { runId: r.id, runName: r.name, parameters: r.config?.parameters };
     });
+
+    renderComparisonCharts(target, results, runInfos);
   } catch (err) {
-    console.error('Failed to load results:', err);
+    target.innerHTML = `<p>Error loading results: ${(err as Error).message}</p>`;
   }
 }

@@ -1,12 +1,16 @@
 import { api } from '../api.js';
+import { ResultRow } from '../components/result-types.js';
+import { buildResultsTable, buildResultRowPair } from '../components/results-table.js';
+import { renderComparisonCharts, RunParamInfo } from '../components/comparison-charts.js';
 
 export async function renderRunMonitor(params: Record<string, string>): Promise<HTMLElement> {
   const id = params.id;
   const container = document.createElement('div');
-  container.innerHTML = '<h1>Run Monitor</h1><p>Loading run...</p>';
+  container.innerHTML = '<h1>Run Detail</h1><p>Loading run...</p>';
 
   let runEvents: EventSource | null = null;
-  let currentRun: Record<string, unknown> | null = null;
+  let allResults: ResultRow[] = [];
+  let runInfos: RunParamInfo[] = [];
 
   function renderProgress(run: Record<string, unknown>): void {
     const prog = run.progress as Record<string, unknown> || {};
@@ -37,18 +41,34 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
     }
   }
 
+  function renderGraphs(): void {
+    const target = container.querySelector('#graphs-target') as HTMLElement | null;
+    if (!target) return;
+    const filterSelect = container.querySelector('#graph-test-filter') as HTMLSelectElement | null;
+    const testFilter = filterSelect?.value || '';
+    const filtered = testFilter ? allResults.filter(r => r.testName === testFilter) : allResults;
+    renderComparisonCharts(target, filtered, runInfos);
+  }
+
+  function rebuildResultsTable(): void {
+    const wrap = container.querySelector('#results-table-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    wrap.appendChild(buildResultsTable(allResults, { showRunColumn: false }));
+  }
+
   function addResult(result: Record<string, unknown>): void {
-    const tbody = container.querySelector('#results-tbody');
-    if (!tbody) return;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${result.testName as string}</td>
-      <td>${(result.modelId as string)?.replace(/^.*[/:]/, '…')}</td>
-      <td><span class="badge badge-${result.status as string}">${result.status as string}</span></td>
-      <td class="text-mono">${(result.stats as Record<string, number>)?.tokenGenerationSpeed?.toFixed(1) ?? '—'} t/s</td>
-      <td class="text-mono">${(result.stats as Record<string, number>)?.elapsedMs ? ((result.stats as Record<string, number>).elapsedMs / 1000).toFixed(1) + 's' : '—'}</td>
-    `;
-    tbody.appendChild(tr);
+    const row = result as unknown as ResultRow;
+    allResults.push(row);
+    const tbody = container.querySelector('#results-table-wrap tbody');
+    if (tbody) {
+      const [tr, detailTr] = buildResultRowPair(row, { showRunColumn: false });
+      tbody.appendChild(tr);
+      tbody.appendChild(detailTr);
+    } else {
+      rebuildResultsTable();
+    }
+    renderGraphs();
   }
 
   function addLog(entry: string): void {
@@ -61,32 +81,21 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
     log.scrollTop = log.scrollHeight;
   }
 
-  function initUI(run: Record<string, unknown>): void {
-    container.innerHTML = `
-      <div id="progress-section"></div>
-      <div class="card" id="controls-section">
-        <button class="btn btn-danger" id="stop-run-btn">Stop Run</button>
-        <button class="btn btn-danger" id="delete-run-btn" style="margin-left:0.5rem">Delete</button>
-      </div>
-      <div class="card" id="results-section">
-        <h2>Results</h2>
-        <table>
-          <thead><tr><th>Test</th><th>Model</th><th>Status</th><th>Speed</th><th>Time</th></tr></thead>
-          <tbody id="results-tbody"></tbody>
-        </table>
-      </div>
-      <div class="card">
-        <h2>Event Log</h2>
-        <div id="event-log" style="max-height:300px;overflow-y:auto;background:var(--surface2);padding:0.5rem;border-radius:var(--radius);font-size:0.8rem"></div>
+  function renderControls(run: Record<string, unknown>): void {
+    const ctrl = container.querySelector('#controls-section');
+    if (!ctrl) return;
+    const status = run.status as string;
+    const isActive = status === 'running' || status === 'pending';
+    ctrl.innerHTML = `
+      <div class="flex gap-1">
+        ${isActive ? '<button class="btn btn-danger" id="stop-run-btn">Stop Run</button>' : ''}
+        <button class="btn btn-danger" id="delete-run-btn">Delete</button>
+        <a href="#/results/graph?runIds=${id}" data-nav class="btn btn-sm">Compare in Graphs</a>
+        <a href="#/results" data-nav class="btn btn-sm">All Results</a>
       </div>
     `;
 
-    // Add existing results
-    const results = (run.results as Record<string, unknown>[]) || [];
-    results.forEach(addResult);
-    renderProgress(run);
-
-    container.querySelector('#stop-run-btn')?.addEventListener('click', async () => {
+    ctrl.querySelector('#stop-run-btn')?.addEventListener('click', async () => {
       try {
         await api.cancelRun(id);
         addLog('→ Cancellation requested');
@@ -95,7 +104,7 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
       }
     });
 
-    container.querySelector('#delete-run-btn')?.addEventListener('click', async () => {
+    ctrl.querySelector('#delete-run-btn')?.addEventListener('click', async () => {
       if (confirm('Delete this run and its output files?')) {
         try {
           await api.deleteRun(id);
@@ -105,6 +114,43 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
         }
       }
     });
+  }
+
+  function initUI(run: Record<string, unknown>): void {
+    const config = run.config as { testNames?: string[]; parameters?: Record<string, unknown> } || {};
+    const testNames = config.testNames || [];
+    runInfos = [{ runId: run.id as string, runName: run.name as string, parameters: config.parameters }];
+
+    container.innerHTML = `
+      <div id="progress-section"></div>
+      <div class="card" id="controls-section"></div>
+      <div class="card" id="graphs-section">
+        <div class="card-header">
+          <h2>Graphs</h2>
+          <select id="graph-test-filter">
+            <option value="">All Tests</option>
+            ${testNames.map(t => `<option value="${t}">${t}</option>`).join('')}
+          </select>
+        </div>
+        <div id="graphs-target"></div>
+      </div>
+      <div class="card" id="results-section">
+        <h2>Results</h2>
+        <div id="results-table-wrap"></div>
+      </div>
+      <div class="card">
+        <h2>Event Log</h2>
+        <div id="event-log" style="max-height:300px;overflow-y:auto;background:var(--surface2);padding:0.5rem;border-radius:var(--radius);font-size:0.8rem"></div>
+      </div>
+    `;
+
+    allResults = ((run.results as Record<string, unknown>[]) || []) as unknown as ResultRow[];
+    rebuildResultsTable();
+    renderGraphs();
+    renderProgress(run);
+    renderControls(run);
+
+    container.querySelector('#graph-test-filter')?.addEventListener('change', renderGraphs);
 
     // Connect SSE
     const events = api.runEvents(id);
@@ -120,21 +166,13 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
         }
         if (event.type === 'progress') {
           const runUpdate = { ...run, progress: event.data };
-          currentRun = runUpdate;
           renderProgress(runUpdate);
         }
         if (event.type === 'completed') {
           addLog(`→ Run ${event.data.status as string}`);
-          renderProgress({ ...run, status: event.data.status, progress: { percentage: 100 } });
-          const ctrl = container.querySelector('#controls-section');
-          if (ctrl) {
-            const btns = ctrl.querySelectorAll('button');
-            btns.forEach(b => (b as HTMLButtonElement).remove());
-            ctrl.innerHTML += `
-              <a href="#/results" data-nav class="btn btn-primary btn-sm">View Results</a>
-              <a href="#/results/graph?runIds=${id}" data-nav class="btn btn-sm" style="margin-left:0.5rem">View Graph</a>
-            `;
-          }
+          const updated = { ...run, status: event.data.status, progress: { ...(run.progress as Record<string, unknown> || {}), percentage: 100 } };
+          renderProgress(updated);
+          renderControls(updated);
         }
         if (event.type === 'error') {
           addLog(`→ Error: ${event.data.error as string}`);
@@ -147,12 +185,11 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
       setTimeout(async () => {
         const updated = await api.getRun(id);
         if (updated) {
-          currentRun = updated;
           renderProgress(updated);
-          const results = (updated.results as Record<string, unknown>[]) || [];
-          const tbody = container.querySelector('#results-tbody');
-          if (tbody) tbody.innerHTML = '';
-          results.forEach(addResult);
+          renderControls(updated);
+          allResults = ((updated.results as Record<string, unknown>[]) || []) as unknown as ResultRow[];
+          rebuildResultsTable();
+          renderGraphs();
         }
       }, 2000);
     });
@@ -164,7 +201,6 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
       container.innerHTML = '<div class="empty-state"><h2>Run Not Found</h2><p>This run does not exist.</p></div>';
       return container;
     }
-    currentRun = run;
     initUI(run);
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><h2>Error</h2><p>${(err as Error).message}</p></div>`;

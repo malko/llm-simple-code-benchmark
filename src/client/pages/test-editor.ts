@@ -1,10 +1,5 @@
 import { api } from '../api.js';
-
-declare const require: {
-  config: (opts: Record<string, unknown>) => void;
-  ready: (cb: () => void) => void;
-  (deps: string[], cb: (...mods: unknown[]) => void): void;
-};
+import { loadMonaco } from '../components/monaco-loader.js';
 
 export async function renderTestEditor(params: Record<string, string>): Promise<HTMLElement> {
   const name = params.name;
@@ -61,66 +56,47 @@ console.log(JSON.stringify(output));
   return container;
 }
 
-function loadMonacoEditors(
+async function loadMonacoEditors(
   container: HTMLElement,
   name: string,
   promptContent: string,
   scriptContent: string,
-): void {
-  const MONACO_CDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs';
+): Promise<void> {
+  const monaco = await loadMonaco();
 
-  if (!document.querySelector('#monaco-loader')) {
-    const script = document.createElement('script');
-    script.id = 'monaco-loader';
-    script.src = `${MONACO_CDN}/loader.js`;
-    document.head.appendChild(script);
-  }
+  const promptEl = container.querySelector('#prompt-editor') as HTMLElement;
+  const scriptEl = container.querySelector('#script-editor') as HTMLElement;
 
-  const checkMonaco = () => {
-    if (typeof require === 'undefined' || typeof require.config === 'undefined') {
-      setTimeout(checkMonaco, 200);
-      return;
+  const promptEditor = monaco.editor.create(promptEl, {
+    value: promptContent,
+    language: 'markdown',
+    theme: 'vs-dark',
+    minimap: { enabled: false },
+    fontSize: 13,
+    automaticLayout: true,
+  });
+
+  const scriptEditor = monaco.editor.create(scriptEl, {
+    value: scriptContent,
+    language: 'typescript',
+    theme: 'vs-dark',
+    minimap: { enabled: false },
+    fontSize: 13,
+    automaticLayout: true,
+  });
+
+  const saveBtn = container.querySelector('#save-test-btn') as HTMLButtonElement;
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    try {
+      await api.saveTest(name, promptEditor.getValue(), scriptEditor.getValue());
+      saveBtn.textContent = 'Saved!';
+      setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 2000);
+    } catch (err) {
+      saveBtn.textContent = 'Error!';
+      alert((err as Error).message);
+      saveBtn.disabled = false;
     }
-
-    require.config({ paths: { vs: MONACO_CDN } });
-    require(['vs/editor/editor.main'], () => {
-      const promptEl = container.querySelector('#prompt-editor') as HTMLElement;
-      const scriptEl = container.querySelector('#script-editor') as HTMLElement;
-
-      const promptEditor = (window as any).monaco.editor.create(promptEl, {
-        value: promptContent,
-        language: 'markdown',
-        theme: 'vs-dark',
-        minimap: { enabled: false },
-        fontSize: 13,
-        automaticLayout: true,
-      });
-
-      const scriptEditor = (window as any).monaco.editor.create(scriptEl, {
-        value: scriptContent,
-        language: 'typescript',
-        theme: 'vs-dark',
-        minimap: { enabled: false },
-        fontSize: 13,
-        automaticLayout: true,
-      });
-
-      const saveBtn = container.querySelector('#save-test-btn') as HTMLButtonElement;
-      saveBtn.addEventListener('click', async () => {
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
-        try {
-          await api.saveTest(name, promptEditor.getValue(), scriptEditor.getValue());
-          saveBtn.textContent = 'Saved!';
-          setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 2000);
-        } catch (err) {
-          saveBtn.textContent = 'Error!';
-          alert((err as Error).message);
-          saveBtn.disabled = false;
-        }
-      });
-    });
-  };
-
-  checkMonaco();
+  });
 }
