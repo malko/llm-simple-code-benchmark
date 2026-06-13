@@ -13,8 +13,9 @@ resultsRouter.get('/', async (req: Request, res: Response) => {
   })));
 
   const { runId, testName, modelId, status } = req.query;
+  const runIds = typeof runId === 'string' ? runId.split(',').filter(Boolean) : [];
   const filtered = allResults.filter(r => {
-    if (runId && r.runId !== runId) return false;
+    if (runIds.length && !runIds.includes(r.runId)) return false;
     if (testName && r.testName !== testName) return false;
     if (modelId && r.modelId !== modelId) return false;
     if (status && r.status !== status) return false;

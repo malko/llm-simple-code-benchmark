@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 
-const STORAGE_KEY = 'llm-code-bench:selected-models';
+const MODEL_STORAGE_KEY = 'llm-code-bench:selected-models';
+const PARAM_STORAGE_KEY = 'llm-code-bench:run-params';
 
 function getSelected(listId: string): string[] {
   const list = document.querySelector(listId);
@@ -8,6 +9,18 @@ function getSelected(listId: string): string[] {
   const checks = list.querySelectorAll('input[type="checkbox"]:checked');
   return Array.from(checks).map(c => (c as HTMLInputElement).value);
 }
+
+const PARAM_DEFAULTS: Record<string, { value: number; min?: number; max?: number; step: number; label: string }> = {
+  temperature: { value: 0.8, min: 0, max: 2, step: 0.05, label: 'Temperature' },
+  maxTokens: { value: 2048, min: 1, max: 32768, step: 1, label: 'Max Tokens' },
+  topP: { value: 0.95, min: 0, max: 1, step: 0.01, label: 'Top P' },
+  topK: { value: 40, min: 0, max: 200, step: 1, label: 'Top K' },
+  minP: { value: 0.05, min: 0, max: 1, step: 0.01, label: 'Min P' },
+  repeatPenalty: { value: 1.1, min: 1, max: 2, step: 0.05, label: 'Repeat Penalty' },
+  seed: { value: -1, step: 1, label: 'Seed (-1 = random)' },
+  maxTurns: { value: 50, min: 1, max: 500, step: 1, label: 'Max Turns (tool calls)' },
+  timeout: { value: 300, min: 10, max: 3600, step: 1, label: 'Timeout (seconds)' },
+};
 
 export async function renderRunLauncher(): Promise<HTMLElement> {
   const container = document.createElement('div');
@@ -33,7 +46,19 @@ export async function renderRunLauncher(): Promise<HTMLElement> {
       return container;
     }
 
-    const savedModelIds: string[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    const savedModelIds: string[] = JSON.parse(localStorage.getItem(MODEL_STORAGE_KEY) || '[]');
+    const savedParams: Record<string, { value: number; enabled: boolean }> = JSON.parse(localStorage.getItem(PARAM_STORAGE_KEY) || '{}');
+
+    function paramState(name: string): { value: number; enabled: boolean } {
+      const s = savedParams[name];
+      if (s) return s;
+      const d = PARAM_DEFAULTS[name];
+      return { value: d?.value ?? 0, enabled: true };
+    }
+
+    function attr(obj: { min?: number; max?: number; step: number }): string {
+      return `step="${obj.step}"${obj.min !== undefined ? ` min="${obj.min}"` : ''}${obj.max !== undefined ? ` max="${obj.max}"` : ''}`;
+    }
 
     container.innerHTML = `
       <div class="card">
@@ -78,69 +103,18 @@ export async function renderRunLauncher(): Promise<HTMLElement> {
         <h2>Parameters</h2>
         <p class="text-muted">Check a parameter to override the server default, uncheck to let the server decide.</p>
         <div class="run-params">
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="temperature" checked>
-              <span>Temperature</span>
-            </label>
-            <input type="number" id="param-temperature" value="0.8" step="0.05" min="0" max="2">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="maxTokens" checked>
-              <span>Max Tokens</span>
-            </label>
-            <input type="number" id="param-max-tokens" value="2048" step="1" min="1" max="32768">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="topP" checked>
-              <span>Top P</span>
-            </label>
-            <input type="number" id="param-top-p" value="0.95" step="0.01" min="0" max="1">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="topK" checked>
-              <span>Top K</span>
-            </label>
-            <input type="number" id="param-top-k" value="40" step="1" min="0" max="200">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="minP" checked>
-              <span>Min P</span>
-            </label>
-            <input type="number" id="param-min-p" value="0.05" step="0.01" min="0" max="1">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="repeatPenalty" checked>
-              <span>Repeat Penalty</span>
-            </label>
-            <input type="number" id="param-repeat-penalty" value="1.1" step="0.05" min="1" max="2">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="seed" checked>
-              <span>Seed (-1 = random)</span>
-            </label>
-            <input type="number" id="param-seed" value="-1" step="1">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="maxTurns" checked>
-              <span>Max Turns (tool calls)</span>
-            </label>
-            <input type="number" id="param-max-turns" value="50" step="1" min="1" max="500">
-          </div>
-          <div class="form-group param-with-toggle">
-            <label class="param-toggle">
-              <input type="checkbox" class="param-enable" data-param="timeout" checked>
-              <span>Timeout (seconds)</span>
-            </label>
-            <input type="number" id="param-timeout" value="300" step="1" min="10" max="3600">
-          </div>
+          ${Object.entries(PARAM_DEFAULTS).map(([name, def]) => {
+            const st = paramState(name);
+            return `
+            <div class="form-group param-with-toggle">
+              <label class="param-toggle">
+                <input type="checkbox" class="param-enable" data-param="${name}" ${st.enabled ? 'checked' : ''}>
+                <span>${def.label}</span>
+              </label>
+              <input type="number" id="param-${name}" value="${st.value}" ${attr(def)}>
+            </div>
+            `;
+          }).join('')}
         </div>
       </div>
 
@@ -168,23 +142,24 @@ export async function renderRunLauncher(): Promise<HTMLElement> {
       const name = (container.querySelector('#run-name') as HTMLInputElement).value.trim();
       if (!name) { alert('Enter a run name.'); return; }
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(modelIds));
+      localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(modelIds));
 
+      const paramState: Record<string, { value: number; enabled: boolean }> = {};
       const parameters: Record<string, number> = {};
-      container.querySelectorAll('.param-enable:checked').forEach(cb => {
+
+      container.querySelectorAll('.param-enable').forEach(cb => {
         const paramName = (cb as HTMLElement).dataset.param!;
         const input = (cb as HTMLElement).closest('.form-group')?.querySelector('input:not(.param-enable)') as HTMLInputElement;
         if (!input) return;
-        const val = input.type === 'number' && input.value.includes('.') ? parseFloat(input.value) : parseInt(input.value, 10);
-        parameters[paramName] = val;
+        const val = input.value.includes('.') ? parseFloat(input.value) : parseInt(input.value, 10);
+        const enabled = (cb as HTMLInputElement).checked;
+        paramState[paramName] = { value: val, enabled };
+        if (enabled) parameters[paramName] = val;
       });
 
-      const config = {
-        name,
-        modelIds,
-        testNames,
-        parameters,
-      };
+      localStorage.setItem(PARAM_STORAGE_KEY, JSON.stringify(paramState));
+
+      const config = { name, modelIds, testNames, parameters };
 
       try {
         const run = await api.createRun(config);

@@ -21,6 +21,7 @@ export async function renderResultsBrowser(): Promise<HTMLElement> {
               ${runs.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}
             </select>
             <input type="text" id="filter-test" placeholder="Filter test name..." style="width:200px">
+            <a href="#/results/graph" data-nav class="btn btn-sm">Graph</a>
           </div>
         </div>
         ${results.length === 0 ? '<p>No results yet.</p>' : `

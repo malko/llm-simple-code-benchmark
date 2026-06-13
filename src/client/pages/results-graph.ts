@@ -11,6 +11,9 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
     const runsRes = await api.listRuns();
     const runs = runsRes.data;
 
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    const preselected = params.get('runIds')?.split(',').filter(Boolean) || [];
+
     container.innerHTML = `
       <div class="card">
         <div class="card-header">
@@ -23,7 +26,7 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
         <div class="selector-list" id="run-selector" style="max-height:200px">
           ${runs.map(r => `
             <label class="selector-item">
-              <input type="checkbox" value="${r.id}">
+              <input type="checkbox" value="${r.id}" ${preselected.includes(r.id) ? 'checked' : ''}>
               <span>${r.name}</span>
               <span class="badge badge-${r.status} ml-1">${r.status}</span>
             </label>
@@ -37,7 +40,7 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
 
     container.querySelector('#update-graph')?.addEventListener('click', () => updateGraph(container));
 
-    if (runs.length > 0) {
+    if (preselected.length > 0 || runs.length > 0) {
       setTimeout(() => updateGraph(container), 100);
     }
   } catch (err) {
@@ -51,22 +54,13 @@ async function updateGraph(container: HTMLElement): Promise<void> {
   const checked = container.querySelectorAll('#run-selector input:checked');
   const runIds = Array.from(checked).map(c => (c as HTMLInputElement).value);
 
-  if (runIds.length === 0) {
-    alert('Select at least one run.');
-    return;
-  }
-
-  const params = new URLSearchParams();
-  runIds.forEach(id => params.append('runId', id));
+  if (runIds.length === 0) return;
 
   try {
-    const res = await api.listResults(Object.fromEntries(params));
+    const res = await api.listResults({ runId: runIds.join(',') });
     const results = res.data as Record<string, unknown>[];
 
-    if (results.length === 0) {
-      alert('No results for selected runs.');
-      return;
-    }
+    if (results.length === 0) return;
 
     const canvas = container.querySelector('#graph-canvas') as HTMLCanvasElement;
     const ctx = canvas.getContext('2d');
@@ -164,8 +158,7 @@ async function updateGraph(container: HTMLElement): Promise<void> {
 
     const chartContainer = canvas.parentElement!;
     chartContainer.style.height = Math.max(400, results.length * 30 + 100) + 'px';
-
   } catch (err) {
-    alert(`Failed to load results: ${(err as Error).message}`);
+    console.error('Failed to load results:', err);
   }
 }

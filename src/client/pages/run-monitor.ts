@@ -126,7 +126,15 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
         if (event.type === 'completed') {
           addLog(`→ Run ${event.data.status as string}`);
           renderProgress({ ...run, status: event.data.status, progress: { percentage: 100 } });
-          (container.querySelector('#stop-run-btn') as HTMLButtonElement)?.remove();
+          const ctrl = container.querySelector('#controls-section');
+          if (ctrl) {
+            const btns = ctrl.querySelectorAll('button');
+            btns.forEach(b => (b as HTMLButtonElement).remove());
+            ctrl.innerHTML += `
+              <a href="#/results" data-nav class="btn btn-primary btn-sm">View Results</a>
+              <a href="#/results/graph?runIds=${id}" data-nav class="btn btn-sm" style="margin-left:0.5rem">View Graph</a>
+            `;
+          }
         }
         if (event.type === 'error') {
           addLog(`→ Error: ${event.data.error as string}`);
