@@ -1,0 +1,27 @@
+Implement a generic Least-Recently-Used (LRU) cache in TypeScript.
+
+Create a file named `lru-cache.ts` in the output directory (at the top level,
+not in a subdirectory) that exports a class named `LRUCache`:
+
+  export class LRUCache<K, V> {
+    constructor(capacity: number)
+    get(key: K): V | undefined
+    put(key: K, value: V): void
+    size(): number
+  }
+
+Behavior:
+- `capacity` is a positive integer: the maximum number of entries the cache holds.
+- `get(key)` returns the value for `key` if present, and marks that entry as the
+  most recently used. Returns `undefined` if `key` is not present.
+- `put(key, value)` inserts or updates the value for `key` and marks it as the
+  most recently used. If `key` already exists, its value is updated (its
+  position becomes most-recently-used) without evicting anything. If inserting
+  a brand-new key would exceed `capacity`, evict the least-recently-used entry
+  first.
+- `size()` returns the current number of entries in the cache.
+
+Use only TypeScript/JavaScript standard library features (no external
+dependencies, no Node-specific APIs). The file must contain only the
+`LRUCache` class and its supporting types/helpers — do not add a `main`
+function, demo code, or console output.

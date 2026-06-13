@@ -1,0 +1,36 @@
+Implement a generic stack data structure in Go.
+
+Create a file named `main.go` in the output directory (package main) that
+defines a generic type `Stack[T any]` (backed by a slice) with these methods:
+
+  - Push(v T)
+  - Pop() (T, bool)   // removes and returns the top element; bool is false
+                      // (and the returned value is the zero value of T) if
+                      // the stack was empty
+  - Peek() (T, bool)  // like Pop but does not remove the element
+  - Len() int         // number of elements currently on the stack
+
+In `main()`, create a `Stack[int]` and run through this sequence, printing one
+line per step with `fmt.Println` (nothing else should be printed):
+
+1. Push 1, then 2, then 3 onto the stack.
+2. Print the stack's length as: `len: <n>`
+3. Pop one element and print it as: `pop: <value>`
+4. Peek at the new top element and print it as: `peek: <value>`
+5. Print the stack's length again as: `len: <n>`
+6. Pop the remaining two elements (discard the results).
+7. Pop once more (the stack is now empty) and print whether the second return
+   value (the "ok" bool) is true or false, as: `empty pop ok: <bool>`
+
+The resulting stdout, in order, must be exactly:
+
+```
+len: 3
+pop: 3
+peek: 2
+len: 2
+empty pop ok: false
+```
+
+The program must build and run with `go run main.go` and use only the Go
+standard library (no external modules, no `go.mod` required).

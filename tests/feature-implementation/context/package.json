@@ -1,0 +1,7 @@
+{
+  "name": "task-store",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny in-memory task list.",
+  "main": "src/taskStore.ts"
+}

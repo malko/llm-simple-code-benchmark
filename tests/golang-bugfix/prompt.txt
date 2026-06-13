@@ -1,0 +1,12 @@
+The Go package in `inventory.go` (module `inventory`) exports three
+functions: `TotalValue`, `LowStock`, and `MostExpensive`. Each one has a doc
+comment describing its behavior.
+
+One of these three functions has a bug — it doesn't match its documented
+behavior. Read `inventory.go`, work out which function is wrong, and fix it.
+
+Constraints:
+- Do not change any function's name or signature.
+- Do not change the behavior of the other two (already-correct) functions.
+- Do not add new files, exports, or dependencies, and don't move/rename
+  `inventory.go`.

@@ -1,0 +1,14 @@
+The TypeScript module `src/strings.ts` exports three functions: `capitalize`,
+`truncate`, and `reverseWords`. Each one has a JSDoc comment describing its
+intended behavior, including examples.
+
+Two of these three functions currently violate their documented behavior —
+they have bugs. Read `src/strings.ts`, work out which function(s) don't match
+their doc comments and examples, and fix them so every documented example
+holds.
+
+Constraints:
+- Do not change any function's name, parameters, or return type.
+- Do not change the behavior of the function that is already correct.
+- Do not add new exports, files, or dependencies, and don't move/rename
+  `src/strings.ts`.

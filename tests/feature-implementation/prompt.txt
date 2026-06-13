@@ -1,0 +1,22 @@
+This repository contains a small in-memory task list module at
+`src/taskStore.ts` (see `README.md` for its current API). Two new features
+have been requested:
+
+1. `deleteTask(id: number): boolean`
+   Removes the task with the given id from the store. Returns `true` if a
+   task was removed, or `false` if no task with that id existed.
+
+2. `filterByStatus(status: TaskStatus): Task[]`
+   Returns all tasks whose `status` matches the given value, in the same
+   relative order as `listTasks()`.
+
+Implement both as new exports in `src/taskStore.ts`, following the existing
+coding style and conventions (in-memory array, small focused functions, JSDoc
+comments).
+
+Constraints:
+- Do not change the behavior or signatures of `createTask`, `listTasks`,
+  `getTask`, `completeTask`, or `_reset`.
+- Do not rename or remove the `Task` / `TaskStatus` types.
+- Do not add new files, exports beyond the two above, or dependencies — only
+  edit `src/taskStore.ts`.
