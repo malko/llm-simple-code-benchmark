@@ -38,6 +38,8 @@ export const api = {
     }),
   cancelRun: (id: string) =>
     request<{ success: boolean }>(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  deleteRun: (id: string) =>
+    request<{ success: boolean }>(`/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   runEvents: (id: string): EventSource =>
     new EventSource(`${BASE}/runs/${encodeURIComponent(id)}/events`),
 

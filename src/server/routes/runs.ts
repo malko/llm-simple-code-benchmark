@@ -56,6 +56,20 @@ runsRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
+runsRouter.delete('/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const run = await storage.getRun(id);
+  if (!run) {
+    res.status(404).json({ error: 'Run not found' });
+    return;
+  }
+  if (runner.isActive(id)) {
+    runner.cancel(id);
+  }
+  await storage.deleteRun(id);
+  res.json({ success: true });
+});
+
 runsRouter.post('/:id/cancel', async (req: Request, res: Response) => {
   const { id } = req.params;
   const ok = runner.cancel(id);

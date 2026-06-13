@@ -1,23 +1,44 @@
 import fs from 'fs/promises';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { Run, TestResult, Settings } from '../types.js';
 
 const TESTS_DIR = process.env.TESTS_DIR || '/app/tests';
 const OUTPUT_DIR = process.env.OUTPUT_DIR || '/app/output';
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const RUNS_FILE = path.join(DATA_DIR, 'runs.json');
+const DB_FILE = path.join(DATA_DIR, 'llm-code-bench.db');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 function ensureDir(dir: string): Promise<void> {
   return fs.mkdir(dir, { recursive: true }).then(() => {});
 }
 
-async function readJSON<T>(file: string, fallback: T): Promise<T> {
+let db: Database.Database;
+
+function getDb(): Database.Database {
+  if (!db) throw new Error('Storage not initialized');
+  return db;
+}
+
+async function migrateFromJson(): Promise<void> {
+  const runsJson = path.join(DATA_DIR, 'runs.json');
   try {
-    const data = await fs.readFile(file, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return fallback;
+    await fs.access(runsJson);
+    const data = await fs.readFile(runsJson, 'utf-8');
+    const runs: Run[] = JSON.parse(data);
+    const insert = getDb().prepare('INSERT OR IGNORE INTO runs (id, data) VALUES (?, ?)');
+    const tx = getDb().transaction((items: Run[]) => {
+      for (const run of items) {
+        insert.run(run.id, JSON.stringify(run));
+      }
+    });
+    tx(runs);
+    await fs.rename(runsJson, runsJson + '.migrated');
+    console.log(`Migrated ${runs.length} runs from runs.json to SQLite`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error('Migration error:', err);
+    }
   }
 }
 
@@ -28,6 +49,19 @@ export const storage = {
       ensureDir(OUTPUT_DIR),
       ensureDir(DATA_DIR),
     ]);
+    db = new Database(DB_FILE);
+    db.pragma('journal_mode = WAL');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS runs (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+    await migrateFromJson();
   },
 
   // Test definitions
@@ -63,30 +97,38 @@ export const storage = {
     await fs.rm(testDir, { recursive: true, force: true });
   },
 
-  // Runs
+  // Runs (SQLite-backed)
   async listRuns(): Promise<Run[]> {
-    return readJSON<Run[]>(RUNS_FILE, []);
+    const rows = getDb().prepare('SELECT data FROM runs ORDER BY rowid').all() as { data: string }[];
+    return rows.map(r => JSON.parse(r.data) as Run);
   },
 
   async saveRuns(runs: Run[]): Promise<void> {
-    await ensureDir(DATA_DIR);
-    await fs.writeFile(RUNS_FILE, JSON.stringify(runs, null, 2), 'utf-8');
+    const tx = getDb().transaction((items: Run[]) => {
+      const del = getDb().prepare('DELETE FROM runs');
+      const ins = getDb().prepare('INSERT INTO runs (id, data) VALUES (?, ?)');
+      del.run();
+      for (const run of items) {
+        ins.run(run.id, JSON.stringify(run));
+      }
+    });
+    tx(runs);
   },
 
   async getRun(id: string): Promise<Run | null> {
-    const runs = await this.listRuns();
-    return runs.find(r => r.id === id) || null;
+    const row = getDb().prepare('SELECT data FROM runs WHERE id = ?').get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as Run : null;
   },
 
   async saveRun(run: Run): Promise<void> {
-    const runs = await this.listRuns();
-    const idx = runs.findIndex(r => r.id === run.id);
-    if (idx >= 0) {
-      runs[idx] = run;
-    } else {
-      runs.push(run);
-    }
-    await this.saveRuns(runs);
+    getDb().prepare(
+      'INSERT INTO runs (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data'
+    ).run(run.id, JSON.stringify(run));
+  },
+
+  async deleteRun(id: string): Promise<boolean> {
+    const result = getDb().prepare('DELETE FROM runs WHERE id = ?').run(id);
+    return result.changes > 0;
   },
 
   // Results
@@ -132,16 +174,16 @@ export const storage = {
     }
   },
 
-  // Settings
+  // Settings (SQLite-backed)
   async getSettings(): Promise<Settings> {
-    return readJSON<Settings>(SETTINGS_FILE, {
-      llamaServerUrl: '',
-      llamaApiKey: '',
-    });
+    const row = getDb().prepare("SELECT value FROM settings WHERE key = 'settings'").get() as { value: string } | undefined;
+    if (row) return JSON.parse(row.value) as Settings;
+    return { llamaServerUrl: '', llamaApiKey: '' };
   },
 
   async saveSettings(settings: Settings): Promise<void> {
-    await ensureDir(DATA_DIR);
-    await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+    getDb().prepare(
+      "INSERT INTO settings (key, value) VALUES ('settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(JSON.stringify(settings));
   },
 };

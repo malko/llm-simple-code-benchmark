@@ -66,6 +66,7 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
       <div id="progress-section"></div>
       <div class="card" id="controls-section">
         <button class="btn btn-danger" id="stop-run-btn">Stop Run</button>
+        <button class="btn btn-danger" id="delete-run-btn" style="margin-left:0.5rem">Delete</button>
       </div>
       <div class="card" id="results-section">
         <h2>Results</h2>
@@ -91,6 +92,17 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
         addLog('→ Cancellation requested');
       } catch (err) {
         addLog(`→ Cancel error: ${(err as Error).message}`);
+      }
+    });
+
+    container.querySelector('#delete-run-btn')?.addEventListener('click', async () => {
+      if (confirm('Delete this run and its output files?')) {
+        try {
+          await api.deleteRun(id);
+          location.hash = '#/';
+        } catch (err) {
+          addLog(`→ Delete error: ${(err as Error).message}`);
+        }
       }
     });
 

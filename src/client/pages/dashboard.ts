@@ -37,15 +37,16 @@ export async function renderDashboard(): Promise<HTMLElement> {
         </div>
         ${runs.length === 0 ? '<p>No runs yet. <a href="#/run" data-nav>Create your first run</a>.</p>' : `
         <table>
-          <thead><tr><th>Name</th><th>Status</th><th>Progress</th><th>Results</th><th>Date</th></tr></thead>
+          <thead><tr><th>Name</th><th>Status</th><th>Progress</th><th>Results</th><th>Date</th><th></th></tr></thead>
           <tbody>
             ${runs.slice(0, 10).map(r => `
-              <tr onclick="location.hash='#/run/${r.id}'" style="cursor:pointer">
-                <td>${r.name}</td>
+              <tr>
+                <td><a href="#/run/${r.id}" data-nav>${r.name}</a></td>
                 <td><span class="badge badge-${r.status}">${r.status}</span></td>
                 <td>${r.progress?.percentage ?? 0}%</td>
                 <td>${r.resultCount}/${r.modelCount * r.testCount}</td>
                 <td>${new Date(r.createdAt).toLocaleDateString()}</td>
+                <td><button class="btn btn-sm btn-danger delete-run" data-id="${r.id}" data-name="${r.name}">Delete</button></td>
               </tr>
             `).join('')}
           </tbody>
@@ -53,6 +54,23 @@ export async function renderDashboard(): Promise<HTMLElement> {
         `}
       </div>
     `;
+
+    container.querySelectorAll('.delete-run').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const el = btn as HTMLElement;
+        const id = el.dataset.id!;
+        const name = el.dataset.name!;
+        if (confirm(`Delete run "${name}"? This will remove the run and its output files.`)) {
+          try {
+            await api.deleteRun(id);
+            location.reload();
+          } catch (err) {
+            alert(`Failed to delete run: ${(err as Error).message}`);
+          }
+        }
+      });
+    });
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><h2>Error</h2><p>${(err as Error).message}</p></div>`;
   }

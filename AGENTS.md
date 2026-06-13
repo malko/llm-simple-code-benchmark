@@ -33,7 +33,7 @@ Models, health, and runs all use the saved settings automatically.
 - **Server**: Express on `:3000`, serves `/api/*` + static client from `dist/client/`. Entry: `src/server/index.ts:1`.
 - **Client**: esbuild bundles `src/client/main.ts` + Chart.js into a single IIFE. Monaco editor loaded from CDN at runtime (`test-editor.ts`).
 - **Runner** (`src/server/services/runner.ts`): async orchestrator. Before each model, it unloads all loaded models and loads the target via `POST /models/load` / `POST /models/unload`, polling until status `"loaded"`. Then runs all tests for that model. Model switch failures skip the model's tests.
-- **File storage** (`src/server/services/storage.ts`): flat JSON in `data/runs.json`, test files in `tests/<name>/`, results in `output/<test>/<run>_<model>/`.
+- **File storage** (`src/server/services/storage.ts`): SQLite in `data/llm-code-bench.db` for runs/settings, test files in `tests/<name>/`, results in `output/<test>/<run>_<model>/`. Migration from legacy `data/runs.json` happens automatically on startup.
 
 ## Conventions
 
