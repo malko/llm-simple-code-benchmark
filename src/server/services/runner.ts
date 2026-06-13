@@ -265,6 +265,7 @@ export const runner = {
           }
 
           const outputDir = storage.getTestOutputDir(runId, testName, modelId);
+          const resultDir = storage.getResultDir(runId, testName, modelId);
           await fs.mkdir(outputDir, { recursive: true });
 
           const result: TestResult = {
@@ -289,25 +290,27 @@ export const runner = {
             );
 
             result.stats = stats;
+            result.completedAt = new Date().toISOString();
             await storage.saveTurns(runId, testName, modelId, messages);
+            await storage.saveResult(runId, testName, modelId, result);
 
             const testOutput = await runTestScript(
               path.join(TESTS_DIR, testName, 'test.ts'),
-              outputDir,
+              resultDir,
             );
             result.testOutput = testOutput;
             result.status = testOutput.passed ? 'passed' : 'failed';
+            await storage.saveResult(runId, testName, modelId, result);
           } catch (err) {
+            result.completedAt = new Date().toISOString();
             if (signal.aborted) {
               result.status = 'cancelled';
             } else {
               result.status = 'error';
               result.error = (err as Error).message;
             }
+            await storage.saveResult(runId, testName, modelId, result);
           }
-
-          result.completedAt = new Date().toISOString();
-          await storage.saveResult(runId, testName, modelId, result);
 
           const run = await storage.getRun(runId);
           if (run) {
