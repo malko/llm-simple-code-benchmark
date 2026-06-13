@@ -66,7 +66,7 @@ runsRouter.delete('/:id', async (req: Request, res: Response) => {
   if (runner.isActive(id)) {
     runner.cancel(id);
   }
-  await storage.deleteRun(id);
+  await storage.deleteRun(run);
   res.json({ success: true });
 });
 

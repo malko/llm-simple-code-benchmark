@@ -126,8 +126,15 @@ export const storage = {
     ).run(run.id, JSON.stringify(run));
   },
 
-  async deleteRun(id: string): Promise<boolean> {
-    const result = getDb().prepare('DELETE FROM runs WHERE id = ?').run(id);
+  async deleteRun(run: Run): Promise<boolean> {
+    const result = getDb().prepare('DELETE FROM runs WHERE id = ?').run(run.id);
+    const deletions = run.config.testNames.flatMap(testName =>
+      run.config.modelIds.map(modelId => {
+        const dir = this.getResultDir(run.id, testName, modelId);
+        return fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+      })
+    );
+    await Promise.all(deletions);
     return result.changes > 0;
   },
 
