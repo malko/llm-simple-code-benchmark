@@ -7,6 +7,7 @@ RUN npm run build
 
 FROM node:lts-alpine AS runner
 WORKDIR /app
+RUN apk add --no-cache go bubblewrap
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./

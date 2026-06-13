@@ -1,8 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { spawn, spawnSync } from 'child_process';
 import { ToolDefinition, ToolCall } from '../types.js';
 
 const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit
+const RUN_COMMAND_TIMEOUT_MS = 30000;
+const MAX_COMMAND_OUTPUT = 8000;
 
 function resolveSafe(baseDir: string, requestedPath: string): string {
   const resolved = path.resolve(baseDir, requestedPath);
@@ -86,6 +89,20 @@ export const toolDefinitions: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'run_command',
+      description: 'Run a shell command (e.g. to build, lint, or test your code) with its working directory set to the output directory. Times out after 30 seconds.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute' },
+        },
+        required: ['command'],
+      },
+    },
+  },
 ];
 
 export const toolExecutor = {
@@ -115,6 +132,9 @@ export const toolExecutor = {
           break;
         case 'list_files':
           result = await execListFiles(baseDir, args.path as string);
+          break;
+        case 'run_command':
+          result = await execRunCommand(baseDir, args.command as string);
           break;
         default:
           result = { error: `Unknown tool: ${name}` };
@@ -180,4 +200,115 @@ async function execListFiles(baseDir: string, dirPath?: string): Promise<{ files
     return e.isDirectory() ? relative + '/' : relative;
   });
   return { files };
+}
+
+// Result is cached for the process lifetime: a one-off smoke test that exercises
+// the same bind setup used for real commands. Requires CAP_SYS_ADMIN, and on most
+// Docker setups also `security_opt: [apparmor:unconfined, seccomp:unconfined]`
+// (see docker-compose.yml) — bwrap's pivot_root/mount calls are otherwise blocked.
+// --unshare-net/--unshare-pid are deliberately not used: bwrap's loopback setup for
+// a fresh netns reliably fails as PID 1 inside a container ("Failed RTM_NEWADDR").
+let bwrapAvailable: boolean | null = null;
+
+function isBwrapAvailable(): boolean {
+  if (bwrapAvailable !== null) return bwrapAvailable;
+  try {
+    const probe = spawnSync('bwrap', [
+      '--ro-bind', '/usr', '/usr',
+      '--ro-bind', '/lib', '/lib',
+      '--ro-bind', '/bin', '/bin',
+      '--ro-bind-try', '/sbin', '/sbin',
+      '--ro-bind-try', '/etc', '/etc',
+      '--proc', '/proc',
+      '--dev', '/dev',
+      '--tmpfs', '/tmp',
+      '--unshare-ipc', '--unshare-uts',
+      '--die-with-parent',
+      '--', 'sh', '-c', 'true',
+    ], { timeout: 5000 });
+    bwrapAvailable = probe.status === 0;
+  } catch {
+    bwrapAvailable = false;
+  }
+  if (!bwrapAvailable) {
+    console.warn('[tool-executor] bubblewrap sandbox unavailable for run_command; falling back to cwd-scoped execution');
+  }
+  return bwrapAvailable;
+}
+
+// /app/tests (hidden harness/expected files) and /app/data (db, settings incl. API key) are
+// masked out by --tmpfs /app; only node_modules (for npx tsc/tsx) and this test's own
+// files dir + cache are re-exposed on top of that empty tree.
+function buildBwrapArgs(baseDir: string, cacheDir: string, command: string): string[] {
+  return [
+    '--ro-bind', '/usr', '/usr',
+    '--ro-bind', '/lib', '/lib',
+    '--ro-bind', '/bin', '/bin',
+    '--ro-bind-try', '/sbin', '/sbin',
+    '--ro-bind-try', '/etc', '/etc',
+    '--proc', '/proc',
+    '--dev', '/dev',
+    '--tmpfs', '/tmp',
+    '--tmpfs', '/root',
+    '--tmpfs', '/app',
+    '--ro-bind-try', '/app/node_modules', '/app/node_modules',
+    '--bind', baseDir, baseDir,
+    '--bind', cacheDir, '/root/.cache',
+    '--chdir', baseDir,
+    '--unshare-ipc', '--unshare-uts',
+    '--die-with-parent',
+    '--', 'sh', '-c', command,
+  ];
+}
+
+function truncateOutput(s: string): string {
+  return s.length > MAX_COMMAND_OUTPUT ? `${s.slice(0, MAX_COMMAND_OUTPUT)}\n...(truncated)` : s;
+}
+
+async function execRunCommand(baseDir: string, command: string): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+  if (!command || !command.trim()) throw new Error('command is required');
+
+  let cmd: string;
+  let args: string[];
+
+  if (isBwrapAvailable()) {
+    const cacheDir = path.join(path.dirname(baseDir), '.runcache');
+    await fs.mkdir(cacheDir, { recursive: true });
+    cmd = 'bwrap';
+    args = buildBwrapArgs(baseDir, cacheDir, command);
+  } else {
+    cmd = 'sh';
+    args = ['-c', command];
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd: baseDir });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, RUN_COMMAND_TIMEOUT_MS);
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    child.on('close', (exitCode) => {
+      clearTimeout(timer);
+      resolve({
+        exitCode,
+        stdout: truncateOutput(stdout),
+        stderr: truncateOutput(stderr),
+        timedOut,
+      });
+    });
+  });
 }

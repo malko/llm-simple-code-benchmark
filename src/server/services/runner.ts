@@ -11,6 +11,18 @@ import { llamaclient } from './llamaclient.js';
 import { toolDefinitions, toolExecutor } from './tool-executor.js';
 import { storage } from './storage.js';
 
+const MAX_FORMAT_RETRIES = 2;
+
+// Some models (e.g. Hermes/Qwen-tuned) sometimes emit pseudo tool calls as plain XML-ish
+// text instead of a structured tool_calls response, which llama.cpp surfaces as finish_reason
+// "stop" with no tool_calls. Detect that so we can ask the model to retry in the right format.
+const MALFORMED_TOOL_CALL_PATTERNS = [/<tool_call>/i, /<\/tool_call>/i, /<function=/i, /<\|tool_call\|>/i];
+
+function looksLikeMalformedToolCall(content: string | null | undefined): boolean {
+  if (!content) return false;
+  return MALFORMED_TOOL_CALL_PATTERNS.some(re => re.test(content));
+}
+
 function formatStats(timings: Record<string, number> | undefined, usage: Record<string, unknown> | undefined, turnCount: number): TestStatsType {
   return {
     turnCount,
@@ -119,6 +131,7 @@ async function chatLoop(
       content: `You are a test agent. You have access to tools for file operations in the output directory.
 Your task: respond to the user's prompt. You may use tools to read/write files as needed.
 The output directory may already contain files relevant to your task (e.g. an existing codebase) — use list_files to check before starting.
+You can use run_command to build, lint, or test your code (e.g. \`go build ./...\`, \`go test ./...\`, \`npx tsc --noEmit\`) before finishing — it runs with its working directory set to the output directory.
 Output directory: ${outputDir}`,
     },
     { role: 'user', content: prompt },
@@ -135,6 +148,7 @@ Output directory: ${outputDir}`,
   };
 
   let turnCount = 0;
+  let formatRetries = 0;
   let cumulativeUsage: Record<string, unknown> = {};
   let cumulativeTimings: Record<string, number> = {};
 
@@ -164,15 +178,6 @@ Output directory: ${outputDir}`,
 
     messages.push(msg as ChatMessage);
 
-    if (finishReason === 'stop' || finishReason === 'length') {
-      const stats = formatStats(
-        cumulativeTimings as Record<string, number>,
-        cumulativeUsage,
-        turnCount,
-      );
-      return { messages, stats };
-    }
-
     if (finishReason === 'tool_calls' && msg.tool_calls) {
       for (const call of msg.tool_calls) {
         if (signal.aborted) throw new Error('Run cancelled');
@@ -183,9 +188,29 @@ Output directory: ${outputDir}`,
           content: result,
         });
       }
-    } else {
-      break;
+      continue;
     }
+
+    if (formatRetries < MAX_FORMAT_RETRIES && looksLikeMalformedToolCall(msg.content)) {
+      formatRetries++;
+      messages.push({
+        role: 'user',
+        content: 'Your previous response was not recognized as a valid tool call. '
+          + 'Do not write tool calls as plain text or XML tags — use the proper function-calling mechanism to call a tool.',
+      });
+      continue;
+    }
+
+    if (finishReason === 'stop' || finishReason === 'length') {
+      const stats = formatStats(
+        cumulativeTimings as Record<string, number>,
+        cumulativeUsage,
+        turnCount,
+      );
+      return { messages, stats };
+    }
+
+    break;
   }
 
   const stats = formatStats(

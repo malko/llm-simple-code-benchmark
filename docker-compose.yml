@@ -11,4 +11,15 @@ services:
       - ./tests:/app/tests
       - ./output:/app/output
       - ./data:/app/data
+    # The run_command tool falls back to plain (cwd-scoped) execution by default, with
+    # the same filesystem access as the existing test scripts (go test/tsc already run
+    # with full container access). To additionally sandbox run_command with bubblewrap
+    # (hides /app/tests and /app/data, restricts writes to the test's own output dir),
+    # uncomment the lines below. Note: seccomp=unconfined disables syscall filtering for
+    # the whole container — only enable this if you understand and accept that trade-off.
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor:unconfined
+    #   - seccomp:unconfined
     restart: unless-stopped
