@@ -24,6 +24,15 @@ function formatStats(timings: Record<string, number> | undefined, usage: Record<
   };
 }
 
+async function copyContext(testName: string, outputDir: string): Promise<void> {
+  const contextDir = path.join(TESTS_DIR, testName, 'context');
+  try {
+    await fs.cp(contextDir, outputDir, { recursive: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
+
 async function runTestScript(scriptPath: string, outputDir: string): Promise<Record<string, unknown>> {
   const ext = path.extname(scriptPath);
   let stdout: string;
@@ -109,6 +118,7 @@ async function chatLoop(
       role: 'system',
       content: `You are a test agent. You have access to tools for file operations in the output directory.
 Your task: respond to the user's prompt. You may use tools to read/write files as needed.
+The output directory may already contain files relevant to your task (e.g. an existing codebase) — use list_files to check before starting.
 Output directory: ${outputDir}`,
     },
     { role: 'user', content: prompt },
@@ -269,6 +279,7 @@ export const runner = {
           const outputDir = storage.getTestOutputDir(runId, testName, modelId);
           const resultDir = storage.getResultDir(runId, testName, modelId);
           await fs.mkdir(outputDir, { recursive: true });
+          await copyContext(testName, outputDir);
 
           const result: TestResult = {
             runId,
