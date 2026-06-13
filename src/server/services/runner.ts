@@ -89,8 +89,11 @@ async function switchToModel(modelId: string, settings: Settings, signal: AbortS
   const models = await llamaclient.listModels(settings);
   const others = models.filter(m => m.id !== modelId && m.status === 'loaded');
   await Promise.all(others.map(m => llamaclient.unloadModel(m.id, settings).catch(() => {})));
-  await llamaclient.loadModel(modelId, settings);
-  await waitForModelReady(modelId, settings, signal);
+  const target = models.find(m => m.id === modelId);
+  if (target?.status !== 'loaded') {
+    await llamaclient.loadModel(modelId, settings);
+    await waitForModelReady(modelId, settings, signal);
+  }
 }
 
 async function chatLoop(
