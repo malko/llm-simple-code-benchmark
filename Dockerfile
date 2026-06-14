@@ -10,6 +10,7 @@ WORKDIR /app
 RUN apk add --no-cache go bubblewrap
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
+RUN ln -s /app/node_modules/.bin/tsc /usr/local/bin/tsc
 COPY package.json ./
 EXPOSE 3000
 CMD ["node", "dist/server/index.js"]

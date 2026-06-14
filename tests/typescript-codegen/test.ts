@@ -54,7 +54,7 @@ details.sourcePath = path.relative(filesDir, sourcePath);
 const sourceDir = path.dirname(sourcePath);
 
 // 1. Strict type-check (informational — functional checks below don't depend on this)
-const strict = run('npx tsc --noEmit --strict --skipLibCheck "' + path.basename(sourcePath) + '"', sourceDir);
+const strict = run('tsc --noEmit --strict --skipLibCheck "' + path.basename(sourcePath) + '"', sourceDir);
 checks.strictCompiles = strict.ok;
 if (!strict.ok) details.strictCompileError = strict.stderr.slice(0, 2000);
 
@@ -65,7 +65,7 @@ fs.copyFileSync(harnessSrc, harnessDest);
 
 const tmpOut = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-codegen-'));
 const compile = run(
-  `npx tsc --module commonjs --target es2020 --esModuleInterop --skipLibCheck --outDir "${tmpOut}" harness.ts`,
+  `tsc --module commonjs --target es2020 --esModuleInterop --skipLibCheck --outDir "${tmpOut}" harness.ts`,
   sourceDir,
 );
 

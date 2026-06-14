@@ -121,17 +121,22 @@ const harnessPath = path.join(testDir, 'harness.ts');
 
 ### Common validation patterns
 
-**A. Type-check generated TypeScript** (uses the repo's own `typescript`, no extra deps):
+> **Note on TypeScript compilation**: The container has `tsc` globally pre-installed
+> (symlinked from `/app/node_modules/.bin/tsc`). Test scripts should invoke `tsc`
+> directly rather than `npx tsc` — this avoids npx download delays, npm-version-dependent
+> resolution quirks, and stdin-prompt issues. All existing TS tests follow this convention.
+
+**A. Type-check generated TypeScript** (uses the global `tsc`, no extra deps):
 
 ```ts
-execSync(`npx tsc --noEmit --strict "${file}"`, { cwd: filesDir });
+execSync(`tsc --noEmit --strict "${file}"`, { cwd: filesDir });
 ```
 
 **B. Compile + run TS functionally** (avoids relying on `tsx` for arbitrary
 agent-written code — plain `tsc` + `node` is more predictable):
 
 ```ts
-execSync(`npx tsc --module commonjs --target es2020 --outDir "${tmpDir}" "${file}"`, { cwd: filesDir });
+execSync(`tsc --module commonjs --target es2020 --outDir "${tmpDir}" "${file}"`, { cwd: filesDir });
 execSync(`node "${path.join(tmpDir, 'foo.js')}"`, { encoding: 'utf-8' });
 ```
 

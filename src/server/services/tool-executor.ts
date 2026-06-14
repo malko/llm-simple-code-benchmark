@@ -237,7 +237,7 @@ function isBwrapAvailable(): boolean {
 }
 
 // /app/tests (hidden harness/expected files) and /app/data (db, settings incl. API key) are
-// masked out by --tmpfs /app; only node_modules (for npx tsc/tsx) and this test's own
+// masked out by --tmpfs /app; only node_modules (for tsc/tsx) and this test's own
 // files dir + cache are re-exposed on top of that empty tree.
 function buildBwrapArgs(baseDir: string, cacheDir: string, command: string): string[] {
   return [

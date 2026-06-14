@@ -135,7 +135,7 @@ async function chatLoop(
       content: `You are a test agent. You have access to tools for file operations in the output directory.
 Your task: respond to the user's prompt. You may use tools to read/write files as needed.
 The output directory may already contain files relevant to your task (e.g. an existing codebase) — use list_files to check before starting.
-You can use run_command to build, lint, or test your code (e.g. \`go build ./...\`, \`go test ./...\`, \`npx tsc --noEmit\`) before finishing — it runs with its working directory set to the output directory.
+You can use run_command to build, lint, or test your code (e.g. \`go build ./...\`, \`go test ./...\`, \`tsc --noEmit\`) before finishing — it runs with its working directory set to the output directory.
 Output directory: ${outputDir}`,
     },
     { role: 'user', content: prompt },

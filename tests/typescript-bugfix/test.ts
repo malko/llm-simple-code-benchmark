@@ -39,14 +39,14 @@ fs.copyFileSync(path.join(testDir, 'harness.ts'), harnessDest);
 
 const tmpOut = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-bugfix-'));
 const compile = run(
-  `npx tsc --module commonjs --target es2020 --esModuleInterop --skipLibCheck --outDir "${tmpOut}" harness.ts`,
+  `tsc --module commonjs --target es2020 --esModuleInterop --skipLibCheck --outDir "${tmpOut}" harness.ts`,
   filesDir,
 );
 
 const details: Record<string, unknown> = {};
 let functional: Record<string, boolean> = {};
 
-if (fs.existsSync(path.join(tmpOut, 'harness.js'))) {
+if (compile.ok || fs.existsSync(path.join(tmpOut, 'harness.js'))) {
   const runResult = run(`node "${path.join(tmpOut, 'harness.js')}"`, filesDir);
   if (runResult.ok) {
     try {
