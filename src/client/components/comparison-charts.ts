@@ -76,6 +76,13 @@ function scoreOf(r: ResultRow): number | undefined {
   return undefined;
 }
 
+function totalTokensOf(r: ResultRow): number | undefined {
+  const generated = r.stats?.tokenGeneratedCount;
+  const prompt = r.stats?.promptTokensCount;
+  if (generated === undefined && prompt === undefined) return undefined;
+  return (generated ?? 0) + (prompt ?? 0);
+}
+
 function colorFor(index: number, total: number): string {
   const hue = Math.round((index * 360) / Math.max(total, 1)) % 360;
   return `hsl(${hue}, 65%, 55%)`;
@@ -112,11 +119,55 @@ function barOptions(yLabel: string, opts: { min?: number; max?: number; showLege
   };
 }
 
+function scatterOptions(xLabel: string, yLabel: string, opts: { yMin?: number; yMax?: number } = {}): ChartConfiguration['options'] {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: true, position: 'top', labels: { color: AXIS_COLOR } },
+    },
+    scales: {
+      x: {
+        beginAtZero: true,
+        title: { display: true, text: xLabel, color: AXIS_COLOR },
+        ticks: { color: AXIS_COLOR },
+        grid: { color: GRID_COLOR },
+      },
+      y: {
+        beginAtZero: true,
+        min: opts.yMin,
+        max: opts.yMax,
+        title: { display: true, text: yLabel, color: AXIS_COLOR },
+        ticks: { color: AXIS_COLOR },
+        grid: { color: GRID_COLOR },
+      },
+    },
+  };
+}
+
+function buildByTestDatasets(
+  series: SeriesEntry[],
+  testNames: string[],
+  colors: string[],
+  pick: (r: ResultRow) => number | undefined,
+  round: (avgValue: number) => number,
+): { label: string; data: (number | null)[]; backgroundColor: string }[] {
+  return series.map((s, i) => ({
+    label: s.label,
+    data: testNames.map(testName => {
+      const vals = s.results.filter(r => r.testName === testName).map(pick).filter((v): v is number => v !== undefined);
+      return vals.length ? round(avg(vals)) : null;
+    }),
+    backgroundColor: colors[i],
+  }));
+}
+
 /**
- * Renders model-vs-settings comparison charts (average score, average speed,
- * total execution time, score by test) into `container`. Each (model, run
- * parameters) combination becomes its own series so the same model run with
- * different settings shows up as separate bars.
+ * Groups model-vs-settings comparison charts into two sections:
+ * "Performance" (score, speed, execution time, score by test) and
+ * "Cost" (token usage, turn counts, and a score-vs-tokens efficiency view).
+ * Each (model, run parameters) combination becomes its own series so the
+ * same model run with different settings shows up as separate bars/points.
  */
 export function renderComparisonCharts(container: HTMLElement, results: ResultRow[], runInfos: RunParamInfo[]): void {
   const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
@@ -128,11 +179,23 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
   }
 
   container.innerHTML = `
+    <h2>Performance</h2>
     <div class="grid-2">
       <div class="chart-container"><h3>Average Score</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-score"></canvas></div></div>
       <div class="chart-container"><h3>Average Speed (tokens/s)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-speed"></canvas></div></div>
       <div class="chart-container"><h3>Total Execution Time (s)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-time"></canvas></div></div>
       <div class="chart-container"><h3>Score by Test</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-by-test"></canvas></div></div>
+    </div>
+
+    <h2 class="mt-1">Cost</h2>
+    <div class="grid-3">
+      <div class="chart-container"><h3>Average Output Tokens</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-gen"></canvas></div></div>
+      <div class="chart-container"><h3>Average Total Tokens (Prompt + Output)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-total"></canvas></div></div>
+      <div class="chart-container"><h3>Average Turn Count</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-turns"></canvas></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="chart-container"><h3>Output Tokens by Test</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-by-test"></canvas></div></div>
+      <div class="chart-container"><h3>Score vs Output Tokens</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-efficiency"></canvas></div></div>
     </div>
   `;
 
@@ -152,6 +215,21 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
   const timeData = series.map(s => {
     const total = s.results.reduce((sum, r) => sum + (r.stats?.elapsedMs ?? 0), 0);
     return Math.round((total / 1000) * 10) / 10;
+  });
+
+  const tokensGenData = series.map(s => {
+    const vals = s.results.map(r => r.stats?.tokenGeneratedCount).filter((v): v is number => v !== undefined);
+    return vals.length ? Math.round(avg(vals)) : 0;
+  });
+
+  const tokensTotalData = series.map(s => {
+    const vals = s.results.map(totalTokensOf).filter((v): v is number => v !== undefined);
+    return vals.length ? Math.round(avg(vals)) : 0;
+  });
+
+  const turnCountData = series.map(s => {
+    const vals = s.results.map(r => r.stats?.turnCount).filter((v): v is number => v !== undefined);
+    return vals.length ? Math.round(avg(vals) * 10) / 10 : 0;
   });
 
   createChart(container.querySelector('#cmp-chart-score') as HTMLCanvasElement, {
@@ -175,20 +253,56 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
     plugins: [darkBgPlugin],
   });
 
+  createChart(container.querySelector('#cmp-chart-tokens-gen') as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Tokens', data: tokensGenData, backgroundColor: colors }] },
+    options: barOptions('Tokens'),
+    plugins: [darkBgPlugin],
+  });
+
+  createChart(container.querySelector('#cmp-chart-tokens-total') as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Tokens', data: tokensTotalData, backgroundColor: colors }] },
+    options: barOptions('Tokens'),
+    plugins: [darkBgPlugin],
+  });
+
+  createChart(container.querySelector('#cmp-chart-turns') as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Turns', data: turnCountData, backgroundColor: colors }] },
+    options: barOptions('Turns'),
+    plugins: [darkBgPlugin],
+  });
+
   const testNames = Array.from(new Set(results.map(r => r.testName))).sort();
-  const byTestDatasets = series.map((s, i) => ({
-    label: s.label,
-    data: testNames.map(testName => {
-      const scores = s.results.filter(r => r.testName === testName).map(scoreOf).filter((v): v is number => v !== undefined);
-      return scores.length ? Math.round(avg(scores) * 1000) / 10 : null;
-    }),
-    backgroundColor: colors[i],
-  }));
+  const byTestDatasets = buildByTestDatasets(series, testNames, colors, scoreOf, v => Math.round(v * 1000) / 10);
+  const tokensByTestDatasets = buildByTestDatasets(series, testNames, colors, r => r.stats?.tokenGeneratedCount, v => Math.round(v));
 
   createChart(container.querySelector('#cmp-chart-by-test') as HTMLCanvasElement, {
     type: 'bar',
     data: { labels: testNames, datasets: byTestDatasets },
     options: barOptions('Score (%)', { min: 0, max: 100, showLegend: true }),
+    plugins: [darkBgPlugin],
+  });
+
+  createChart(container.querySelector('#cmp-chart-tokens-by-test') as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels: testNames, datasets: tokensByTestDatasets },
+    options: barOptions('Tokens', { showLegend: true }),
+    plugins: [darkBgPlugin],
+  });
+
+  const efficiencyDatasets = series.map((s, i) => ({
+    label: s.label,
+    data: [{ x: tokensGenData[i], y: scoreData[i] }],
+    backgroundColor: colors[i],
+    pointRadius: 8,
+  }));
+
+  createChart(container.querySelector('#cmp-chart-efficiency') as HTMLCanvasElement, {
+    type: 'scatter',
+    data: { datasets: efficiencyDatasets },
+    options: scatterOptions('Avg Output Tokens', 'Score (%)', { yMin: 0, yMax: 100 }),
     plugins: [darkBgPlugin],
   });
 }
