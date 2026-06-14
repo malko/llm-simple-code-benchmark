@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 
 const MODEL_STORAGE_KEY = 'llm-code-bench:selected-models';
+const TEST_STORAGE_KEY = 'llm-code-bench:selected-tests';
 const PARAM_STORAGE_KEY = 'llm-code-bench:run-params';
 
 function getSelected(listId: string): string[] {
@@ -47,6 +48,7 @@ export async function renderRunLauncher(): Promise<HTMLElement> {
     }
 
     const savedModelIds: string[] = JSON.parse(localStorage.getItem(MODEL_STORAGE_KEY) || '[]');
+    const savedTestNames: string[] = JSON.parse(localStorage.getItem(TEST_STORAGE_KEY) || '[]');
     const savedParams: Record<string, { value: number; enabled: boolean }> = JSON.parse(localStorage.getItem(PARAM_STORAGE_KEY) || '{}');
 
     function paramState(name: string): { value: number; enabled: boolean } {
@@ -91,7 +93,7 @@ export async function renderRunLauncher(): Promise<HTMLElement> {
           <div class="selector-list" id="test-list">
             ${tests.map((t, i) => `
               <label class="selector-item">
-                <input type="checkbox" value="${t.name}" ${i === 0 ? 'checked' : ''}>
+                <input type="checkbox" value="${t.name}" ${(savedTestNames.length > 0 ? savedTestNames.includes(t.name) : i === 0) ? 'checked' : ''}>
                 <span>${t.name}</span>
               </label>
             `).join('')}
@@ -143,6 +145,7 @@ export async function renderRunLauncher(): Promise<HTMLElement> {
       if (!name) { alert('Enter a run name.'); return; }
 
       localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(modelIds));
+      localStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(testNames));
 
       const paramState: Record<string, { value: number; enabled: boolean }> = {};
       const parameters: Record<string, number> = {};
