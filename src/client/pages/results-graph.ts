@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { ResultRow } from '../components/result-types.js';
-import { renderComparisonCharts, RunParamInfo, SplitMode } from '../components/comparison-charts.js';
+import { renderComparisonCharts, RunParamInfo, SplitMode, getDifferingSettingKeys } from '../components/comparison-charts.js';
+import { renderMarkdown, buildStandaloneHtml } from '../components/markdown.js';
 
 interface GraphState {
   allResults: ResultRow[];
@@ -8,6 +9,11 @@ interface GraphState {
   excludedTests: Set<string>;
   excludedModels: Set<string>;
   splitMode: SplitMode;
+  splitSettingKey: string;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
 export async function renderResultsGraph(): Promise<HTMLElement> {
@@ -56,8 +62,38 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
             <p class="text-muted">Controls how runs of the same model are grouped into series in the charts below.</p>
           </div>
         </div>
+        <div class="form-group mt-1">
+          <h3>Split charts by setting</h3>
+          <select id="setting-split-filter">
+            <option value="">None</option>
+          </select>
+          <p class="text-muted">When the selection contains different settings, isolate the impact of a single setting on a model: charts are grouped per model with all other settings held constant, varying only this setting.</p>
+        </div>
       </details>
       <div id="charts-target"></div>
+
+      <details class="card" id="analysis-card" open>
+        <summary><h2>Analysis</h2></summary>
+        <p class="text-muted">Generate a detailed report on the current selection (selected runs, with the filters above applied) using a model from your llama.cpp server.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Analysis model</label>
+            <select id="analysis-model"><option value="">Loading models…</option></select>
+          </div>
+        </div>
+        <div class="flex gap-1 items-center mb-1">
+          <button class="btn btn-primary" id="generate-analysis-btn">Generate Analysis</button>
+          <span id="analysis-status" class="text-muted"></span>
+        </div>
+        <div id="analysis-result" style="display:none">
+          <div class="flex gap-1 items-center mb-1 mt-1">
+            <input id="analysis-report-name" placeholder="Report name" style="flex:1">
+            <button class="btn" id="save-analysis-btn">Save Report</button>
+            <button class="btn" id="export-analysis-btn">Export HTML</button>
+          </div>
+          <div id="analysis-content" class="card" style="max-height:600px; overflow:auto"></div>
+        </div>
+      </details>
     `;
 
     const state: GraphState = {
@@ -66,6 +102,7 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
       excludedTests: new Set(),
       excludedModels: new Set(),
       splitMode: 'auto',
+      splitSettingKey: '',
     };
 
     container.querySelector('#run-selector')?.addEventListener('change', () => refreshResults(container, state));
@@ -73,6 +110,12 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
       state.splitMode = (e.target as HTMLSelectElement).value as SplitMode;
       applyFilters(container, state);
     });
+    container.querySelector('#setting-split-filter')?.addEventListener('change', (e) => {
+      state.splitSettingKey = (e.target as HTMLSelectElement).value;
+      applyFilters(container, state);
+    });
+
+    setupAnalysisSection(container, state);
 
     if (preselected.length > 0) {
       await refreshResults(container, state);
@@ -178,6 +221,19 @@ function renderFilters(container: HTMLElement, state: GraphState): void {
       applyFilters(container, state);
     });
   });
+
+  const settingSplitFilter = container.querySelector('#setting-split-filter') as HTMLSelectElement | null;
+  if (settingSplitFilter) {
+    const keys = getDifferingSettingKeys(state.allResults, state.runInfos);
+    settingSplitFilter.innerHTML = '<option value="">None</option>'
+      + keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
+    if (keys.includes(state.splitSettingKey)) {
+      settingSplitFilter.value = state.splitSettingKey;
+    } else {
+      state.splitSettingKey = '';
+      settingSplitFilter.value = '';
+    }
+  }
 }
 
 function applyFilters(container: HTMLElement, state: GraphState): void {
@@ -193,5 +249,97 @@ function applyFilters(container: HTMLElement, state: GraphState): void {
     return;
   }
 
-  renderComparisonCharts(target, filtered, state.runInfos, state.splitMode);
+  renderComparisonCharts(target, filtered, state.runInfos, state.splitMode, state.splitSettingKey || undefined);
+}
+
+function setupAnalysisSection(container: HTMLElement, state: GraphState): void {
+  const modelSelect = container.querySelector('#analysis-model') as HTMLSelectElement;
+  const generateBtn = container.querySelector('#generate-analysis-btn') as HTMLButtonElement;
+  const statusEl = container.querySelector('#analysis-status') as HTMLElement;
+  const resultEl = container.querySelector('#analysis-result') as HTMLElement;
+  const contentEl = container.querySelector('#analysis-content') as HTMLElement;
+  const nameInput = container.querySelector('#analysis-report-name') as HTMLInputElement;
+  const saveBtn = container.querySelector('#save-analysis-btn') as HTMLButtonElement;
+  const exportBtn = container.querySelector('#export-analysis-btn') as HTMLButtonElement;
+  if (!modelSelect || !generateBtn) return;
+
+  let lastReport: { name: string; content: string; modelId: string; runIds: string[] } | null = null;
+
+  api.listModels().then(res => {
+    if (res.data.length === 0) {
+      modelSelect.innerHTML = '<option value="">No models available</option>';
+      generateBtn.disabled = true;
+      return;
+    }
+    modelSelect.innerHTML = res.data.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.id)}</option>`).join('');
+  }).catch(() => {
+    modelSelect.innerHTML = '<option value="">Cannot reach llama server</option>';
+    generateBtn.disabled = true;
+  });
+
+  generateBtn.addEventListener('click', async () => {
+    const checked = container.querySelectorAll('#run-selector input:checked');
+    const runIds = Array.from(checked).map(c => (c as HTMLInputElement).value);
+    const analysisModelId = modelSelect.value;
+
+    if (runIds.length === 0) {
+      statusEl.textContent = 'Select at least one run to compare first.';
+      return;
+    }
+    if (!analysisModelId) {
+      statusEl.textContent = 'Select a model to generate the analysis with.';
+      return;
+    }
+
+    generateBtn.disabled = true;
+    resultEl.style.display = 'none';
+    statusEl.textContent = 'Generating analysis… this loads the model on the llama.cpp server and may take a while.';
+
+    try {
+      const report = await api.generateReport({
+        analysisModelId,
+        runIds,
+        excludedTests: Array.from(state.excludedTests),
+        excludedModels: Array.from(state.excludedModels),
+        splitMode: state.splitMode,
+        splitSettingKey: state.splitSettingKey || undefined,
+      });
+      lastReport = report;
+      contentEl.innerHTML = renderMarkdown(report.content);
+      nameInput.value = report.name;
+      resultEl.style.display = '';
+      statusEl.textContent = '';
+    } catch (err) {
+      statusEl.textContent = `Error: ${(err as Error).message}`;
+    } finally {
+      generateBtn.disabled = false;
+    }
+  });
+
+  saveBtn?.addEventListener('click', async () => {
+    if (!lastReport) return;
+    const name = nameInput.value.trim() || lastReport.name;
+    saveBtn.disabled = true;
+    try {
+      await api.saveReport({ name, modelId: lastReport.modelId, runIds: lastReport.runIds, content: lastReport.content });
+      statusEl.textContent = `Report saved as "${name}". View it in the Reports section.`;
+    } catch (err) {
+      statusEl.textContent = `Error saving report: ${(err as Error).message}`;
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  exportBtn?.addEventListener('click', () => {
+    if (!lastReport) return;
+    const name = nameInput.value.trim() || lastReport.name;
+    const html = buildStandaloneHtml(name, lastReport.content);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
 }

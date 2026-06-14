@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { Run, TestResult, Settings } from '../types.js';
+import { Run, TestResult, Settings, Report } from '../types.js';
 
 const TESTS_DIR = process.env.TESTS_DIR || '/app/tests';
 const OUTPUT_DIR = process.env.OUTPUT_DIR || '/app/output';
@@ -59,6 +59,10 @@ export const storage = {
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS reports (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL
       );
     `);
     await migrateFromJson();
@@ -209,5 +213,27 @@ export const storage = {
     getDb().prepare(
       "INSERT INTO settings (key, value) VALUES ('settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).run(JSON.stringify(settings));
+  },
+
+  // Reports (SQLite-backed)
+  async listReports(): Promise<Report[]> {
+    const rows = getDb().prepare('SELECT data FROM reports ORDER BY rowid DESC').all() as { data: string }[];
+    return rows.map(r => JSON.parse(r.data) as Report);
+  },
+
+  async getReport(id: string): Promise<Report | null> {
+    const row = getDb().prepare('SELECT data FROM reports WHERE id = ?').get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as Report : null;
+  },
+
+  async saveReport(report: Report): Promise<void> {
+    getDb().prepare(
+      'INSERT INTO reports (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data'
+    ).run(report.id, JSON.stringify(report));
+  },
+
+  async deleteReport(id: string): Promise<boolean> {
+    const result = getDb().prepare('DELETE FROM reports WHERE id = ?').run(id);
+    return result.changes > 0;
   },
 };

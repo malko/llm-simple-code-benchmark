@@ -56,6 +56,30 @@ export const api = {
     request<{ path: string; content: string }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/file?path=${encodeURIComponent(filePath)}${repeat !== undefined ? `&repeat=${repeat}` : ''}`),
   getStats: () => request<Record<string, number>>('/results/stats'),
 
+  // Reports
+  generateReport: (payload: {
+    analysisModelId: string;
+    runIds: string[];
+    excludedTests?: string[];
+    excludedModels?: string[];
+    splitMode?: string;
+    splitSettingKey?: string;
+  }) =>
+    request<{ name: string; content: string; modelId: string; runIds: string[] }>('/reports/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  listReports: () => request<{ data: { id: string; name: string; createdAt: string; modelId: string; runIds: string[] }[] }>('/reports'),
+  getReport: (id: string) =>
+    request<{ id: string; name: string; createdAt: string; modelId: string; runIds: string[]; content: string }>(`/reports/${encodeURIComponent(id)}`),
+  saveReport: (payload: { name: string; modelId: string; runIds: string[]; content: string }) =>
+    request<{ id: string; name: string; createdAt: string; modelId: string; runIds: string[]; content: string }>('/reports', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteReport: (id: string) =>
+    request<{ success: boolean }>(`/reports/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   // Settings
   getSettings: () => request<{ llamaServerUrl: string; llamaApiKey: string }>('/settings'),
   saveSettings: (settings: { llamaServerUrl: string; llamaApiKey: string }) =>

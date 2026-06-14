@@ -155,6 +155,19 @@ export interface Settings {
   llamaApiKey: string;
 }
 
+/** A saved LLM-generated analysis report over a selection of run results. */
+export interface Report {
+  id: string;
+  name: string;
+  createdAt: string;
+  /** Model used to generate the report. */
+  modelId: string;
+  /** Runs the report was generated from. */
+  runIds: string[];
+  /** Markdown report content. */
+  content: string;
+}
+
 export interface LlamaModelEntry {
   id: string;
   path?: string;

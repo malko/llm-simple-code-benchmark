@@ -10,7 +10,7 @@ export interface RunParamInfo {
   modelRuntimeInfo?: Record<string, { args?: string[]; meta?: Record<string, unknown> }>;
 }
 
-interface SeriesEntry {
+export interface SeriesEntry {
   key: string;
   label: string;
   modelId: string;
@@ -52,7 +52,7 @@ function seriesSignature(info: RunParamInfo | undefined, modelId: string, splitM
   return paramsSignature(info?.parameters) + '||' + argsSignature(info?.modelRuntimeInfo?.[modelId]?.args);
 }
 
-function buildSeries(results: ResultRow[], runInfos: Map<string, RunParamInfo>, splitMode: SplitMode): SeriesEntry[] {
+export function buildSeries(results: ResultRow[], runInfos: Map<string, RunParamInfo>, splitMode: SplitMode): SeriesEntry[] {
   const modelSigs = new Map<string, Set<string>>();
   for (const r of results) {
     const sig = seriesSignature(runInfos.get(r.runId), r.modelId, splitMode);
@@ -136,7 +136,7 @@ function createChart(canvas: HTMLCanvasElement, config: ChartConfiguration): voi
   (canvas as unknown as { __chart?: Chart }).__chart = new Chart(canvas.getContext('2d')!, config);
 }
 
-function barOptions(yLabel: string, opts: { min?: number; max?: number; showLegend?: boolean } = {}): ChartConfiguration['options'] {
+function barOptions(yLabel: string, opts: { min?: number; max?: number; showLegend?: boolean; xLabel?: string } = {}): ChartConfiguration['options'] {
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -144,7 +144,11 @@ function barOptions(yLabel: string, opts: { min?: number; max?: number; showLege
       legend: { display: !!opts.showLegend, position: 'top', labels: { color: AXIS_COLOR } },
     },
     scales: {
-      x: { ticks: { color: AXIS_COLOR, maxRotation: 45 }, grid: { color: GRID_COLOR } },
+      x: {
+        ticks: { color: AXIS_COLOR, maxRotation: 45 },
+        grid: { color: GRID_COLOR },
+        title: opts.xLabel ? { display: true, text: opts.xLabel, color: AXIS_COLOR } : undefined,
+      },
       y: {
         beginAtZero: true,
         min: opts.min,
@@ -232,7 +236,7 @@ function basename(p: string): string {
   return p.split(/[\\/]/).pop() || p;
 }
 
-function settingsOf(s: SeriesEntry, runInfoMap: Map<string, RunParamInfo>): Record<string, string> {
+export function settingsOf(s: SeriesEntry, runInfoMap: Map<string, RunParamInfo>): Record<string, string> {
   const info = runInfoMap.get(s.results[0]?.runId);
   const rows: Record<string, string> = {};
   for (const [k, v] of Object.entries(info?.parameters || {})) {
@@ -247,7 +251,7 @@ function settingsOf(s: SeriesEntry, runInfoMap: Map<string, RunParamInfo>): Reco
 }
 
 /** Returns only the settings (bench parameters + llama.cpp launch args) that differ across series. */
-function buildSettingsDiff(series: SeriesEntry[], runInfoMap: Map<string, RunParamInfo>): { key: string; values: string[] }[] {
+export function buildSettingsDiff(series: SeriesEntry[], runInfoMap: Map<string, RunParamInfo>): { key: string; values: string[] }[] {
   const perSeries = series.map(s => settingsOf(s, runInfoMap));
   const allKeys = new Set<string>();
   perSeries.forEach(r => Object.keys(r).forEach(k => allKeys.add(k)));
@@ -260,13 +264,68 @@ function buildSettingsDiff(series: SeriesEntry[], runInfoMap: Map<string, RunPar
 }
 
 /**
+ * Returns the list of bench-parameter / llama.cpp setting keys that differ across the
+ * selected results (using "auto" series, i.e. one series per unique settings combination).
+ * Used to populate the "Split charts by setting" selector.
+ */
+export function getDifferingSettingKeys(results: ResultRow[], runInfos: RunParamInfo[]): string[] {
+  const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
+  const series = buildSeries(results, runInfoMap, 'auto');
+  if (series.length < 2) return [];
+  return buildSettingsDiff(series, runInfoMap).map(row => row.key);
+}
+
+function isNumericValue(s: string): boolean {
+  return /^-?\d+(\.\d+)?$/.test(s.trim());
+}
+
+function compareSettingValues(a: string, b: string): number {
+  if (isNumericValue(a) && isNumericValue(b)) return parseFloat(a) - parseFloat(b);
+  return a.localeCompare(b);
+}
+
+export interface SettingImpactGroup {
+  modelId: string;
+  /** Settings (other than the split key) that are identical across all items in this group. */
+  contextSettings: Record<string, string>;
+  /** One entry per distinct value of the split key, sorted by that value. */
+  items: { value: string; series: SeriesEntry }[];
+}
+
+/**
+ * Groups "auto" series by (model + all settings except `key`), keeping only groups where
+ * `key` actually takes more than one value — isolating the effect of varying just that
+ * one setting while everything else (model, other bench params, llama.cpp args) stays fixed.
+ */
+export function buildSettingImpactGroups(results: ResultRow[], runInfos: RunParamInfo[], key: string): SettingImpactGroup[] {
+  const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
+  const series = buildSeries(results, runInfoMap, 'auto');
+  const groups = new Map<string, SettingImpactGroup>();
+  for (const s of series) {
+    const settings = settingsOf(s, runInfoMap);
+    const value = settings[key] ?? '—';
+    const others = Object.fromEntries(Object.entries(settings).filter(([k]) => k !== key));
+    const groupKey = `${s.modelId}::${JSON.stringify(Object.entries(others).sort())}`;
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = { modelId: s.modelId, contextSettings: others, items: [] };
+      groups.set(groupKey, group);
+    }
+    group.items.push({ value, series: s });
+  }
+  return Array.from(groups.values())
+    .filter(g => new Set(g.items.map(i => i.value)).size > 1)
+    .map(g => ({ ...g, items: g.items.slice().sort((a, b) => compareSettingValues(a.value, b.value)) }));
+}
+
+/**
  * Groups model-vs-settings comparison charts into two sections:
  * "Performance" (score, speed, execution time, score by test) and
  * "Cost" (token usage, turn counts, and a score-vs-tokens efficiency view).
  * Each (model, run parameters) combination becomes its own series so the
  * same model run with different settings shows up as separate bars/points.
  */
-export function renderComparisonCharts(container: HTMLElement, results: ResultRow[], runInfos: RunParamInfo[], splitMode: SplitMode = 'auto'): void {
+export function renderComparisonCharts(container: HTMLElement, results: ResultRow[], runInfos: RunParamInfo[], splitMode: SplitMode = 'auto', splitSettingKey?: string): void {
   const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
   const series = buildSeries(results, runInfoMap, splitMode);
 
@@ -277,8 +336,9 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
 
   const hasRepeats = results.some(r => (r.repeatCount ?? 1) > 1);
   const settingsDiff = series.length > 1 ? buildSettingsDiff(series, runInfoMap) : [];
+  const impactGroups = splitSettingKey ? buildSettingImpactGroups(results, runInfos, splitSettingKey) : [];
 
-  container.innerHTML = `
+  const mainHtml = `
     ${series.length > 1 ? `
     <details class="card" open>
       <summary><h2>Compared Series</h2></summary>
@@ -328,6 +388,21 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
     </details>
     ` : ''}
   `;
+
+  const impactHtml = splitSettingKey ? (impactGroups.length > 0 ? `
+    <details class="card" open>
+      <summary><h2>Setting Impact: ${escapeHtml(splitSettingKey)}</h2></summary>
+      <p class="text-muted">Each section below isolates the effect of "${escapeHtml(splitSettingKey)}" while holding the model and all other settings constant.</p>
+      ${impactGroups.map((g, gi) => renderImpactGroupHtml(g, gi, splitSettingKey)).join('')}
+    </details>
+  ` : `
+    <details class="card" open>
+      <summary><h2>Setting Impact: ${escapeHtml(splitSettingKey)}</h2></summary>
+      <p class="text-muted">No groups found where "${escapeHtml(splitSettingKey)}" varies while the model and all other settings stay constant.</p>
+    </details>
+  `) : '';
+
+  container.innerHTML = mainHtml + impactHtml;
 
   const labels = series.map(s => s.label);
   const colors = series.map((_, i) => colorFor(i, series.length));
@@ -448,4 +523,82 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
       plugins: [darkBgPlugin],
     });
   }
+
+  if (splitSettingKey) {
+    impactGroups.forEach((g, gi) => createImpactCharts(container, g, gi, splitSettingKey));
+  }
+}
+
+/** Renders one "impact" sub-section: charts comparing values of `key` for a fixed model + other-settings context. */
+function renderImpactGroupHtml(g: SettingImpactGroup, gi: number, key: string): string {
+  const contextEntries = Object.entries(g.contextSettings);
+  return `
+    <div class="card" style="background:var(--surface2)">
+      <h3>${escapeHtml(shortModelName(g.modelId))}</h3>
+      ${contextEntries.length > 0 ? `
+      <p class="text-muted">Other settings held constant:</p>
+      <table class="stats-table">
+        <tbody>
+          ${contextEntries.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="text-mono">${escapeHtml(v)}</td></tr>`).join('')}
+        </tbody>
+      </table>
+      ` : ''}
+      <div class="grid-2">
+        <div class="chart-container"><h3>Average Score</h3><div class="chart-canvas-wrap"><canvas id="impact-${gi}-score"></canvas></div></div>
+        <div class="chart-container"><h3>Average Speed (tokens/s)</h3><div class="chart-canvas-wrap"><canvas id="impact-${gi}-speed"></canvas></div></div>
+        <div class="chart-container"><h3>Average Output Tokens</h3><div class="chart-canvas-wrap"><canvas id="impact-${gi}-tokens"></canvas></div></div>
+        <div class="chart-container"><h3>Score by Test</h3><div class="chart-canvas-wrap"><canvas id="impact-${gi}-by-test"></canvas></div></div>
+      </div>
+    </div>
+  `;
+}
+
+function createImpactCharts(container: HTMLElement, g: SettingImpactGroup, gi: number, key: string): void {
+  const labels = g.items.map(i => i.value);
+  const colors = g.items.map((_, i) => colorFor(i, g.items.length));
+
+  const scoreData = g.items.map(i => {
+    const scores = i.series.results.map(scoreOf).filter((v): v is number => v !== undefined);
+    return scores.length ? Math.round(avg(scores) * 1000) / 10 : 0;
+  });
+  const speedData = g.items.map(i => {
+    const speeds = i.series.results.map(r => r.stats?.tokenGenerationSpeed).filter((v): v is number => v !== undefined);
+    return speeds.length ? Math.round(avg(speeds) * 10) / 10 : 0;
+  });
+  const tokensData = g.items.map(i => {
+    const vals = i.series.results.map(r => r.stats?.tokenGeneratedCount).filter((v): v is number => v !== undefined);
+    return vals.length ? Math.round(avg(vals)) : 0;
+  });
+
+  createChart(container.querySelector(`#impact-${gi}-score`) as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Score (%)', data: scoreData, backgroundColor: colors }] },
+    options: barOptions('Score (%)', { min: 0, max: 100, xLabel: key }),
+    plugins: [darkBgPlugin],
+  });
+
+  createChart(container.querySelector(`#impact-${gi}-speed`) as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Tokens/s', data: speedData, backgroundColor: colors }] },
+    options: barOptions('Tokens/s', { xLabel: key }),
+    plugins: [darkBgPlugin],
+  });
+
+  createChart(container.querySelector(`#impact-${gi}-tokens`) as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Tokens', data: tokensData, backgroundColor: colors }] },
+    options: barOptions('Tokens', { xLabel: key }),
+    plugins: [darkBgPlugin],
+  });
+
+  const testNames = Array.from(new Set(g.items.flatMap(i => i.series.results.map(r => r.testName)))).sort();
+  const byTestSeries: SeriesEntry[] = g.items.map(i => ({ ...i.series, label: i.value }));
+  const byTestDatasets = buildByTestDatasets(byTestSeries, testNames, colors, scoreOf, v => Math.round(v * 1000) / 10);
+
+  createChart(container.querySelector(`#impact-${gi}-by-test`) as HTMLCanvasElement, {
+    type: 'bar',
+    data: { labels: testNames, datasets: byTestDatasets },
+    options: barOptions('Score (%)', { min: 0, max: 100, showLegend: true }),
+    plugins: [darkBgPlugin],
+  });
 }
