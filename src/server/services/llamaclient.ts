@@ -1,4 +1,4 @@
-import { LlamaChatResponse, ChatMessage, ToolDefinition, Settings } from '../types.js';
+import { LlamaChatResponse, ChatMessage, ModelInfo, ToolDefinition, Settings } from '../types.js';
 
 const ENV_URL = process.env.LLAMA_SERVER_URL || 'http://127.0.0.1:8080';
 const ENV_KEY = process.env.LLAMA_API_KEY || '';
@@ -15,7 +15,7 @@ function resolveHeaders(settings?: Pick<Settings, 'llamaApiKey'>): Record<string
 }
 
 export const llamaclient = {
-  async listModels(settings?: Settings): Promise<{ id: string; status: string; meta?: Record<string, unknown> }[]> {
+  async listModels(settings?: Settings): Promise<ModelInfo[]> {
     const url = resolveUrl(settings);
     const headers = resolveHeaders(settings);
     const res = await fetch(`${url}/models`, {
@@ -24,13 +24,17 @@ export const llamaclient = {
     });
     if (!res.ok) throw new Error(`Failed to list models: ${res.status}`);
     const body = await res.json();
-    return (body.data || []).map((m: Record<string, unknown>) => ({
-      id: m.id as string,
-      path: m.path as string | undefined,
-      status: ((m.status as Record<string, string>)?.value as string) || 'unknown',
-      meta: m.meta as Record<string, unknown> | undefined,
-      architecture: m.architecture as Record<string, unknown> | undefined,
-    }));
+    return (body.data || []).map((m: Record<string, unknown>) => {
+      const status = m.status as Record<string, unknown> | undefined;
+      return {
+        id: m.id as string,
+        path: m.path as string | undefined,
+        status: ((status?.value as string) || 'unknown') as ModelInfo['status'],
+        args: status?.args as string[] | undefined,
+        meta: m.meta as Record<string, unknown> | undefined,
+        architecture: m.architecture as Record<string, unknown> | undefined,
+      };
+    });
   },
 
   async chat(

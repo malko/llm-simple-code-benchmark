@@ -6,6 +6,7 @@ export async function renderFileViewer(
   testName: string,
   modelId: string,
   preferredFile?: string,
+  repeatIndex?: number,
 ): Promise<HTMLElement> {
   const container = document.createElement('div');
   container.className = 'file-viewer';
@@ -13,7 +14,7 @@ export async function renderFileViewer(
 
   let files: string[];
   try {
-    const res = await api.getResultFiles(runId, testName, modelId);
+    const res = await api.getResultFiles(runId, testName, modelId, repeatIndex);
     files = res.data;
   } catch (err) {
     container.innerHTML = `<p>Error loading files: ${(err as Error).message}</p>`;
@@ -55,7 +56,7 @@ export async function renderFileViewer(
       el.classList.toggle('active', (el as HTMLElement).dataset.path === filePath);
     });
     try {
-      const { content } = await api.getResultFileContent(runId, testName, modelId, filePath);
+      const { content } = await api.getResultFileContent(runId, testName, modelId, filePath, repeatIndex);
       monaco.editor.setModelLanguage(editor.getModel()!, languageForFile(filePath));
       editor.setValue(content);
     } catch (err) {

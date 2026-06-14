@@ -5,7 +5,7 @@ export interface ResultsTableOptions {
   showRunColumn?: boolean;
 }
 
-const COLUMN_COUNT_BASE = 7; // Test, Model, Status, Score, Speed, Tokens, Time
+const COLUMN_COUNT_BASE = 8; // Test, Model, Run, Status, Score, Speed, Tokens, Time
 
 function shortModelName(modelId: string): string {
   return (modelId || '').replace(/^.*[/:]/g, '').slice(0, 30);
@@ -29,6 +29,7 @@ export function buildResultRowPair(row: ResultRow, opts: ResultsTableOptions = {
     ${opts.showRunColumn ? `<td>${row.runName}</td>` : ''}
     <td>${row.testName}</td>
     <td title="${row.modelId}">${shortModelName(row.modelId)}</td>
+    <td class="text-mono">${row.repeatCount && row.repeatCount > 1 ? `${row.repeatIndex ?? '—'}/${row.repeatCount}` : '—'}</td>
     <td><span class="badge badge-${row.status}">${row.status}</span></td>
     <td class="text-mono">${formatScore(row)}</td>
     <td class="text-mono">${stats?.tokenGenerationSpeed?.toFixed(1) ?? '—'} t/s</td>
@@ -75,6 +76,7 @@ export function buildResultsTable(results: ResultRow[], opts: ResultsTableOption
         ${opts.showRunColumn ? '<th>Run</th>' : ''}
         <th>Test</th>
         <th>Model</th>
+        <th>Repeat</th>
         <th>Status</th>
         <th>Score</th>
         <th>Speed</th>

@@ -1,12 +1,13 @@
 import { api } from '../api.js';
 import { ResultRow } from '../components/result-types.js';
-import { renderComparisonCharts, RunParamInfo } from '../components/comparison-charts.js';
+import { renderComparisonCharts, RunParamInfo, SplitMode } from '../components/comparison-charts.js';
 
 interface GraphState {
   allResults: ResultRow[];
   runInfos: RunParamInfo[];
   excludedTests: Set<string>;
   excludedModels: Set<string>;
+  splitMode: SplitMode;
 }
 
 export async function renderResultsGraph(): Promise<HTMLElement> {
@@ -21,10 +22,8 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
     const preselected = params.get('runIds')?.split(',').filter(Boolean) || [];
 
     container.innerHTML = `
-      <div class="card">
-        <div class="card-header">
-          <h2>Compare Results</h2>
-        </div>
+      <details class="card" open>
+        <summary><h2>Compare Results</h2></summary>
         <p>Select runs to compare. Same model run with different parameters across runs is shown as a separate series.</p>
         <div class="selector-list" id="run-selector" style="max-height:200px">
           ${runs.map(r => `
@@ -35,10 +34,10 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
             </label>
           `).join('')}
         </div>
-      </div>
-      <div class="card" id="filters-card" style="display:none">
-        <div class="card-header"><h2>Filters</h2></div>
-        <div class="grid-2">
+      </details>
+      <details class="card" id="filters-card" style="display:none" open>
+        <summary><h2>Filters</h2></summary>
+        <div class="grid-3">
           <div>
             <h3>Tests</h3>
             <div class="selector-list" id="test-filter" style="max-height:200px"></div>
@@ -47,8 +46,17 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
             <h3>Models</h3>
             <div class="selector-list" id="model-filter" style="max-height:200px"></div>
           </div>
+          <div>
+            <h3>Group series by</h3>
+            <select id="split-mode-filter">
+              <option value="auto">Auto (split when settings differ)</option>
+              <option value="run">Always split by run</option>
+              <option value="model">Model only (merge across runs)</option>
+            </select>
+            <p class="text-muted">Controls how runs of the same model are grouped into series in the charts below.</p>
+          </div>
         </div>
-      </div>
+      </details>
       <div id="charts-target"></div>
     `;
 
@@ -57,9 +65,14 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
       runInfos: [],
       excludedTests: new Set(),
       excludedModels: new Set(),
+      splitMode: 'auto',
     };
 
     container.querySelector('#run-selector')?.addEventListener('change', () => refreshResults(container, state));
+    container.querySelector('#split-mode-filter')?.addEventListener('change', (e) => {
+      state.splitMode = (e.target as HTMLSelectElement).value as SplitMode;
+      applyFilters(container, state);
+    });
 
     if (preselected.length > 0) {
       await refreshResults(container, state);
@@ -103,8 +116,13 @@ async function refreshResults(container: HTMLElement, state: GraphState): Promis
 
     state.allResults = resultsRes.data as unknown as ResultRow[];
     state.runInfos = runDetails.filter(Boolean).map(run => {
-      const r = run as unknown as { id: string; name: string; config?: { parameters?: Record<string, unknown> } };
-      return { runId: r.id, runName: r.name, parameters: r.config?.parameters };
+      const r = run as unknown as {
+        id: string;
+        name: string;
+        config?: { parameters?: Record<string, unknown> };
+        modelRuntimeInfo?: RunParamInfo['modelRuntimeInfo'];
+      };
+      return { runId: r.id, runName: r.name, parameters: r.config?.parameters, modelRuntimeInfo: r.modelRuntimeInfo };
     });
 
     renderFilters(container, state);
@@ -175,5 +193,5 @@ function applyFilters(container: HTMLElement, state: GraphState): void {
     return;
   }
 
-  renderComparisonCharts(target, filtered, state.runInfos);
+  renderComparisonCharts(target, filtered, state.runInfos, state.splitMode);
 }

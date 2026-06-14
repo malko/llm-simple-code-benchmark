@@ -128,25 +128,28 @@ export const storage = {
 
   async deleteRun(run: Run): Promise<boolean> {
     const result = getDb().prepare('DELETE FROM runs WHERE id = ?').run(run.id);
+    const repeatCount = Math.max(1, run.config.parameters?.repeatCount || 1);
     const deletions = run.config.testNames.flatMap(testName =>
-      run.config.modelIds.map(modelId => {
-        const dir = this.getResultDir(run.id, testName, modelId);
-        return fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-      })
+      run.config.modelIds.flatMap(modelId =>
+        Array.from({ length: repeatCount }, (_, i) => i + 1).map(ri => {
+          const dir = this.getResultDir(run.id, testName, modelId, repeatCount > 1 ? ri : undefined);
+          return fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+        })
+      )
     );
     await Promise.all(deletions);
     return result.changes > 0;
   },
 
   // Results
-  async saveResult(runId: string, testName: string, modelId: string, result: TestResult): Promise<void> {
-    const resultDir = this.getResultDir(runId, testName, modelId);
+  async saveResult(runId: string, testName: string, modelId: string, result: TestResult, repeatIndex?: number): Promise<void> {
+    const resultDir = this.getResultDir(runId, testName, modelId, repeatIndex);
     await ensureDir(resultDir);
     await fs.writeFile(path.join(resultDir, 'results.json'), JSON.stringify(result, null, 2), 'utf-8');
   },
 
-  async getResult(runId: string, testName: string, modelId: string): Promise<TestResult | null> {
-    const resultDir = this.getResultDir(runId, testName, modelId);
+  async getResult(runId: string, testName: string, modelId: string, repeatIndex?: number): Promise<TestResult | null> {
+    const resultDir = this.getResultDir(runId, testName, modelId, repeatIndex);
     try {
       const data = await fs.readFile(path.join(resultDir, 'results.json'), 'utf-8');
       return JSON.parse(data);
@@ -155,24 +158,25 @@ export const storage = {
     }
   },
 
-  async saveTurns(runId: string, testName: string, modelId: string, turns: unknown[]): Promise<void> {
-    const resultDir = this.getResultDir(runId, testName, modelId);
+  async saveTurns(runId: string, testName: string, modelId: string, turns: unknown[], repeatIndex?: number): Promise<void> {
+    const resultDir = this.getResultDir(runId, testName, modelId, repeatIndex);
     await ensureDir(resultDir);
     await fs.writeFile(path.join(resultDir, 'turns.json'), JSON.stringify(turns, null, 2), 'utf-8');
   },
 
-  getResultDir(runId: string, testName: string, modelId: string): string {
+  getResultDir(runId: string, testName: string, modelId: string, repeatIndex?: number): string {
     const safeModel = modelId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    return path.join(OUTPUT_DIR, testName, `${runId}_${safeModel}`);
+    const suffix = repeatIndex !== undefined ? `_r${repeatIndex}` : '';
+    return path.join(OUTPUT_DIR, testName, `${runId}_${safeModel}${suffix}`);
   },
 
-  getTestOutputDir(runId: string, testName: string, modelId: string): string {
-    const dir = this.getResultDir(runId, testName, modelId);
+  getTestOutputDir(runId: string, testName: string, modelId: string, repeatIndex?: number): string {
+    const dir = this.getResultDir(runId, testName, modelId, repeatIndex);
     return path.join(dir, 'files');
   },
 
-  async listOutputFiles(runId: string, testName: string, modelId: string): Promise<string[]> {
-    const dir = this.getTestOutputDir(runId, testName, modelId);
+  async listOutputFiles(runId: string, testName: string, modelId: string, repeatIndex?: number): Promise<string[]> {
+    const dir = this.getTestOutputDir(runId, testName, modelId, repeatIndex);
     try {
       const entries = await fs.readdir(dir, { recursive: true, withFileTypes: true });
       return entries.filter(e => e.isFile()).map(e => path.relative(dir, path.join(e.parentPath, e.name)));
@@ -181,8 +185,8 @@ export const storage = {
     }
   },
 
-  async getOutputFileContent(runId: string, testName: string, modelId: string, filePath: string): Promise<string | null> {
-    const dir = path.resolve(this.getTestOutputDir(runId, testName, modelId));
+  async getOutputFileContent(runId: string, testName: string, modelId: string, filePath: string, repeatIndex?: number): Promise<string | null> {
+    const dir = path.resolve(this.getTestOutputDir(runId, testName, modelId, repeatIndex));
     const resolved = path.resolve(dir, filePath);
     if (resolved !== dir && !resolved.startsWith(dir + path.sep)) return null;
     try {

@@ -21,6 +21,7 @@ export async function renderResultDetail(row: ResultRow): Promise<HTMLElement> {
         <h3>Stats</h3>
         <table class="stats-table">
           <tr><td>Status</td><td><span class="badge badge-${row.status}">${row.status}</span></td></tr>
+          ${row.repeatCount && row.repeatCount > 1 ? `<tr><td>Repeat</td><td>${row.repeatIndex ?? '—'} / ${row.repeatCount}</td></tr>` : ''}
           ${output?.score !== undefined ? `<tr><td>Score</td><td>${(output.score * 100).toFixed(1)}%</td></tr>` : ''}
           <tr><td>Turns</td><td>${stats?.turnCount ?? '—'}</td></tr>
           <tr><td>Tokens generated</td><td>${stats?.tokenGeneratedCount ?? '—'}</td></tr>
@@ -52,7 +53,7 @@ export async function renderResultDetail(row: ResultRow): Promise<HTMLElement> {
 
   const target = container.querySelector('.file-viewer-target')!;
   const preferred = typeof details.sourcePath === 'string' ? details.sourcePath as string : undefined;
-  const viewer = await renderFileViewer(row.runId, row.testName, row.modelId, preferred);
+  const viewer = await renderFileViewer(row.runId, row.testName, row.modelId, preferred, row.repeatIndex);
   target.innerHTML = '';
   target.appendChild(viewer);
 

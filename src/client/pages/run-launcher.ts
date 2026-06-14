@@ -21,6 +21,7 @@ const PARAM_DEFAULTS: Record<string, { value: number; min?: number; max?: number
   seed: { value: -1, step: 1, label: 'Seed (-1 = random)' },
   maxTurns: { value: 50, min: 1, max: 500, step: 1, label: 'Max Turns (tool calls)' },
   timeout: { value: 300, min: 10, max: 3600, step: 1, label: 'Timeout (seconds)' },
+  repeatCount: { value: 1, min: 1, max: 10, step: 1, label: 'Repeat Count (consistency runs)' },
 };
 
 export async function renderRunLauncher(): Promise<HTMLElement> {

@@ -4,7 +4,7 @@ import { execSync, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
 import {
-  Run, RunConfig, TestResult, TestStats, ChatMessage,
+  Run, RunConfig, TestResult, TestStats, ChatMessage, ModelInfo,
   ToolCall, ToolDefinition, RunEvent, Settings, TestStats as TestStatsType,
 } from '../types.js';
 import { llamaclient } from './llamaclient.js';
@@ -106,14 +106,18 @@ async function waitForModelReady(modelId: string, settings: Settings, signal: Ab
   throw new Error(`Timed out waiting for model "${modelId}" to load`);
 }
 
-async function switchToModel(modelId: string, settings: Settings, signal: AbortSignal): Promise<void> {
+async function switchToModel(modelId: string, settings: Settings, signal: AbortSignal): Promise<ModelInfo | undefined> {
   const models = await llamaclient.listModels(settings);
   const target = models.find(m => m.id === modelId);
-  if (target?.status === 'loaded') return;
-  const others = models.filter(m => m.id !== modelId && m.status === 'loaded');
-  await Promise.all(others.map(m => llamaclient.unloadModel(m.id, settings).catch(() => {})));
-  await llamaclient.loadModel(modelId, settings);
-  await waitForModelReady(modelId, settings, signal);
+  if (target?.status !== 'loaded') {
+    const others = models.filter(m => m.id !== modelId && m.status === 'loaded');
+    await Promise.all(others.map(m => llamaclient.unloadModel(m.id, settings).catch(() => {})));
+    await llamaclient.loadModel(modelId, settings);
+    await waitForModelReady(modelId, settings, signal);
+  }
+  // Re-fetch so we capture the loaded model's runtime args + GGUF meta (only populated once loaded).
+  const refreshed = await llamaclient.listModels(settings);
+  return refreshed.find(m => m.id === modelId);
 }
 
 async function chatLoop(
@@ -268,7 +272,11 @@ export const runner = {
   async execute(runId: string, config: RunConfig, signal: AbortSignal): Promise<void> {
     try {
       const settings = await storage.getSettings();
-      const totalSteps = config.modelIds.length * config.testNames.length;
+      const run = await storage.getRun(runId);
+      if (!run) return;
+
+      const repeatCount = Math.max(1, config.parameters.repeatCount || 1);
+      const totalSteps = config.modelIds.length * config.testNames.length * repeatCount;
       let completedSteps = 0;
 
       for (let mi = 0; mi < config.modelIds.length; mi++) {
@@ -279,15 +287,28 @@ export const runner = {
           modelId, modelIndex: mi, totalModels: config.modelIds.length,
         });
 
+        let modelInfo: ModelInfo | undefined;
         try {
-          await switchToModel(modelId, settings, signal);
+          modelInfo = await switchToModel(modelId, settings, signal);
         } catch (err) {
           for (let ti = 0; ti < config.testNames.length; ti++) {
             const testName = config.testNames[ti];
             runEmitter.emitError(runId, { testName, modelId, error: `Model switch failed: ${(err as Error).message}` });
-            completedSteps++;
+            completedSteps += repeatCount;
           }
           continue;
+        }
+
+        if (modelInfo) {
+          run.modelRuntimeInfo = run.modelRuntimeInfo || {};
+          run.modelRuntimeInfo[modelId] = {
+            id: modelInfo.id,
+            path: modelInfo.path,
+            args: modelInfo.args,
+            meta: modelInfo.meta,
+            architecture: modelInfo.architecture,
+          };
+          await storage.saveRun(run);
         }
 
         for (let ti = 0; ti < config.testNames.length; ti++) {
@@ -297,61 +318,65 @@ export const runner = {
           const test = await storage.getTest(testName);
           if (!test) {
             runEmitter.emitError(runId, { testName, modelId, error: `Test "${testName}" not found` });
-            completedSteps++;
+            completedSteps += repeatCount;
             continue;
           }
 
-          const outputDir = storage.getTestOutputDir(runId, testName, modelId);
-          const resultDir = storage.getResultDir(runId, testName, modelId);
-          await fs.mkdir(outputDir, { recursive: true });
-          await copyContext(testName, outputDir);
+          for (let ri = 1; ri <= repeatCount; ri++) {
+            if (signal.aborted) { await finalizeRun(runId, 'cancelled'); return; }
 
-          const result: TestResult = {
-            runId,
-            testName,
-            modelId,
-            status: 'running',
-            startedAt: new Date().toISOString(),
-            stats: {
-              turnCount: 0, tokenGeneratedCount: 0, promptTokensCount: 0,
-              promptProcessingSpeed: 0, tokenGenerationSpeed: 0,
-              elapsedMs: 0, promptMs: 0, predictedMs: 0,
-            },
-            testOutput: {},
-            outputPath: outputDir,
-          };
-          runEmitter.emitTestStart(runId, { testName, modelId });
+            const dirRepeat = repeatCount > 1 ? ri : undefined;
+            const outputDir = storage.getTestOutputDir(runId, testName, modelId, dirRepeat);
+            const resultDir = storage.getResultDir(runId, testName, modelId, dirRepeat);
+            await fs.mkdir(outputDir, { recursive: true });
+            await copyContext(testName, outputDir);
 
-          try {
-            const { messages, stats } = await chatLoop(
-              modelId, test.prompt, toolDefinitions, outputDir, config.parameters, signal, settings,
-            );
+            const result: TestResult = {
+              runId,
+              testName,
+              modelId,
+              status: 'running',
+              startedAt: new Date().toISOString(),
+              stats: {
+                turnCount: 0, tokenGeneratedCount: 0, promptTokensCount: 0,
+                promptProcessingSpeed: 0, tokenGenerationSpeed: 0,
+                elapsedMs: 0, promptMs: 0, predictedMs: 0,
+              },
+              testOutput: {},
+              outputPath: outputDir,
+              repeatIndex: dirRepeat,
+              repeatCount,
+            };
+            runEmitter.emitTestStart(runId, { testName, modelId, repeatIndex: ri, repeatCount });
 
-            result.stats = stats;
-            result.completedAt = new Date().toISOString();
-            await storage.saveTurns(runId, testName, modelId, messages);
-            await storage.saveResult(runId, testName, modelId, result);
+            try {
+              const { messages, stats } = await chatLoop(
+                modelId, test.prompt, toolDefinitions, outputDir, config.parameters, signal, settings,
+              );
 
-            const testOutput = await runTestScript(
-              path.join(TESTS_DIR, testName, 'test.ts'),
-              resultDir,
-            );
-            result.testOutput = testOutput;
-            result.status = testOutput.passed ? 'passed' : 'failed';
-            await storage.saveResult(runId, testName, modelId, result);
-          } catch (err) {
-            result.completedAt = new Date().toISOString();
-            if (signal.aborted) {
-              result.status = 'cancelled';
-            } else {
-              result.status = 'error';
-              result.error = (err as Error).message;
+              result.stats = stats;
+              result.completedAt = new Date().toISOString();
+              await storage.saveTurns(runId, testName, modelId, messages, dirRepeat);
+              await storage.saveResult(runId, testName, modelId, result, dirRepeat);
+
+              const testOutput = await runTestScript(
+                path.join(TESTS_DIR, testName, 'test.ts'),
+                resultDir,
+              );
+              result.testOutput = testOutput;
+              result.status = testOutput.passed ? 'passed' : 'failed';
+              await storage.saveResult(runId, testName, modelId, result, dirRepeat);
+            } catch (err) {
+              result.completedAt = new Date().toISOString();
+              if (signal.aborted) {
+                result.status = 'cancelled';
+              } else {
+                result.status = 'error';
+                result.error = (err as Error).message;
+              }
+              await storage.saveResult(runId, testName, modelId, result, dirRepeat);
             }
-            await storage.saveResult(runId, testName, modelId, result);
-          }
 
-          const run = await storage.getRun(runId);
-          if (run) {
             run.results.push(result);
             completedSteps++;
             run.progress = {
@@ -363,14 +388,16 @@ export const runner = {
               currentTestName: testName,
               currentOperation: result.status,
               percentage: Math.round((completedSteps / totalSteps) * 100),
+              currentRepeatIndex: ri,
+              totalRepeats: repeatCount,
             };
             await storage.saveRun(run);
-          }
 
-          runEmitter.emitTestEnd(runId, {
-            testName, modelId, status: result.status, stats: result.stats,
-          });
-          runEmitter.emitProgress(runId, (run?.progress || {}) as Record<string, unknown>);
+            runEmitter.emitTestEnd(runId, {
+              testName, modelId, status: result.status, stats: result.stats, repeatIndex: ri, repeatCount,
+            });
+            runEmitter.emitProgress(runId, run.progress as unknown as Record<string, unknown>);
+          }
         }
       }
 

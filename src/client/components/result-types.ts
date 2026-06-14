@@ -26,4 +26,6 @@ export interface ResultRow {
   stats?: ResultStats;
   testOutput?: ResultOutput;
   error?: string;
+  repeatIndex?: number;
+  repeatCount?: number;
 }

@@ -48,12 +48,12 @@ export const api = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request<{ data: Record<string, unknown>[] }>('/results' + qs);
   },
-  getResult: (runId: string, testName: string, modelId: string) =>
-    request<Record<string, unknown>>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}`),
-  getResultFiles: (runId: string, testName: string, modelId: string) =>
-    request<{ data: string[] }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/files`),
-  getResultFileContent: (runId: string, testName: string, modelId: string, filePath: string) =>
-    request<{ path: string; content: string }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/file?path=${encodeURIComponent(filePath)}`),
+  getResult: (runId: string, testName: string, modelId: string, repeat?: number) =>
+    request<Record<string, unknown>>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}${repeat !== undefined ? `?repeat=${repeat}` : ''}`),
+  getResultFiles: (runId: string, testName: string, modelId: string, repeat?: number) =>
+    request<{ data: string[] }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/files${repeat !== undefined ? `?repeat=${repeat}` : ''}`),
+  getResultFileContent: (runId: string, testName: string, modelId: string, filePath: string, repeat?: number) =>
+    request<{ path: string; content: string }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/file?path=${encodeURIComponent(filePath)}${repeat !== undefined ? `&repeat=${repeat}` : ''}`),
   getStats: () => request<Record<string, number>>('/results/stats'),
 
   // Settings

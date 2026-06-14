@@ -8,6 +8,7 @@ export interface RunParameters {
   seed: number;
   timeout: number;
   maxTurns: number;
+  repeatCount: number;
 }
 
 export interface RunConfig {
@@ -21,8 +22,19 @@ export interface ModelInfo {
   id: string;
   path?: string;
   status: 'loaded' | 'unloaded' | 'loading';
+  args?: string[];
   meta?: Record<string, unknown>;
+  architecture?: Record<string, unknown>;
   multimodal?: boolean;
+}
+
+/** Snapshot of how llama.cpp serves a model (launch args + GGUF meta), captured from /models once it's loaded. */
+export interface ModelRuntimeInfo {
+  id: string;
+  path?: string;
+  args?: string[];
+  meta?: Record<string, unknown>;
+  architecture?: Record<string, unknown>;
 }
 
 export interface Run {
@@ -34,6 +46,7 @@ export interface Run {
   progress: RunProgress;
   results: TestResult[];
   error?: string;
+  modelRuntimeInfo?: Record<string, ModelRuntimeInfo>;
 }
 
 export interface RunProgress {
@@ -45,6 +58,8 @@ export interface RunProgress {
   currentTestName: string;
   currentOperation: string;
   percentage: number;
+  currentRepeatIndex?: number;
+  totalRepeats?: number;
 }
 
 export interface TestResult {
@@ -58,6 +73,8 @@ export interface TestResult {
   testOutput: Record<string, unknown>;
   error?: string;
   outputPath: string;
+  repeatIndex?: number;
+  repeatCount?: number;
 }
 
 export interface TestStats {

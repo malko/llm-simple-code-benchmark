@@ -60,6 +60,29 @@ p { margin-bottom: 0.5rem; color: var(--text2); }
   margin-bottom: 1rem;
 }
 
+details.card > summary {
+  cursor: pointer;
+  list-style: none;
+}
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+details.card > summary h2::before {
+  content: '▾';
+  font-size: 0.8em;
+  color: var(--text2);
+  transition: transform 0.15s;
+}
+details.card:not([open]) > summary h2 {
+  margin-bottom: 0;
+}
+details.card:not([open]) > summary h2::before {
+  transform: rotate(-90deg);
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

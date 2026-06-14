@@ -25,9 +25,14 @@ resultsRouter.get('/', async (req: Request, res: Response) => {
   res.json({ data: filtered });
 });
 
+function parseRepeat(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 resultsRouter.get('/:runId/:testName/:modelId', async (req: Request, res: Response) => {
   const { runId, testName, modelId } = req.params;
-  const result = await storage.getResult(runId, testName, modelId);
+  const result = await storage.getResult(runId, testName, modelId, parseRepeat(req.query.repeat));
   if (!result) {
     res.status(404).json({ error: 'Result not found' });
     return;
@@ -37,7 +42,7 @@ resultsRouter.get('/:runId/:testName/:modelId', async (req: Request, res: Respon
 
 resultsRouter.get('/:runId/:testName/:modelId/files', async (req: Request, res: Response) => {
   const { runId, testName, modelId } = req.params;
-  const files = await storage.listOutputFiles(runId, testName, modelId);
+  const files = await storage.listOutputFiles(runId, testName, modelId, parseRepeat(req.query.repeat));
   res.json({ data: files });
 });
 
@@ -48,7 +53,7 @@ resultsRouter.get('/:runId/:testName/:modelId/file', async (req: Request, res: R
     res.status(400).json({ error: 'path query parameter is required' });
     return;
   }
-  const content = await storage.getOutputFileContent(runId, testName, modelId, filePath);
+  const content = await storage.getOutputFileContent(runId, testName, modelId, filePath, parseRepeat(req.query.repeat));
   if (content === null) {
     res.status(404).json({ error: 'File not found' });
     return;

@@ -3,6 +3,52 @@ import { ResultRow } from '../components/result-types.js';
 import { buildResultsTable, buildResultRowPair } from '../components/results-table.js';
 import { renderComparisonCharts, RunParamInfo } from '../components/comparison-charts.js';
 
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function formatModelMeta(meta: Record<string, unknown>): string {
+  const rows: [string, string][] = [];
+  if (typeof meta.n_ctx === 'number') rows.push(['Context size', meta.n_ctx.toLocaleString()]);
+  if (typeof meta.n_ctx_train === 'number') rows.push(['Trained context', meta.n_ctx_train.toLocaleString()]);
+  if (typeof meta.n_params === 'number') rows.push(['Parameters', `${(meta.n_params / 1e9).toFixed(2)}B`]);
+  if (typeof meta.size === 'number') rows.push(['Size on disk', `${(meta.size / 1e9).toFixed(2)} GB`]);
+  if (rows.length === 0) return '';
+  return `<table class="stats-table">${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+}
+
+function renderModelSettingsCard(run: Record<string, unknown>): string {
+  const modelIds = ((run.config as { modelIds?: string[] })?.modelIds) || [];
+  if (modelIds.length === 0) return '';
+  const runtimeInfo = (run.modelRuntimeInfo as Record<string, { args?: string[]; meta?: Record<string, unknown> }>) || {};
+  const entries = modelIds.filter(id => runtimeInfo[id]);
+
+  if (entries.length === 0) {
+    return `
+      <div class="card" id="model-settings-section">
+        <h2>Model Settings (llama.cpp)</h2>
+        <p class="text-muted">No llama.cpp settings were captured for this run (this run predates the model-settings capture feature, or the model switch was skipped).</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="card" id="model-settings-section">
+      <h2>Model Settings (llama.cpp)</h2>
+      ${entries.map(id => {
+        const info = runtimeInfo[id];
+        return `
+          <details open>
+            <summary>${escapeHtml(id)}</summary>
+            ${info.meta ? formatModelMeta(info.meta) : ''}
+            ${info.args ? `<pre class="details-json">${escapeHtml(info.args.join(' '))}</pre>` : ''}
+          </details>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
 export async function renderRunMonitor(params: Record<string, string>): Promise<HTMLElement> {
   const id = params.id;
   const container = document.createElement('div');
@@ -30,6 +76,7 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
         <div class="flex gap-2 items-center">
           <span>Model ${(prog.currentModelIndex as number || 0) + 1}/${prog.totalModels}: <strong>${prog.currentModelId as string || '—'}</strong></span>
           <span>Test ${(prog.currentTestIndex as number || 0) + 1}/${prog.totalTests}: <strong>${prog.currentTestName as string || '—'}</strong></span>
+          ${(prog.totalRepeats as number || 1) > 1 ? `<span>Repeat ${prog.currentRepeatIndex as number || 1}/${prog.totalRepeats}</span>` : ''}
           <span>${pct}%</span>
         </div>
       </div>
@@ -119,11 +166,17 @@ export async function renderRunMonitor(params: Record<string, string>): Promise<
   function initUI(run: Record<string, unknown>): void {
     const config = run.config as { testNames?: string[]; parameters?: Record<string, unknown> } || {};
     const testNames = config.testNames || [];
-    runInfos = [{ runId: run.id as string, runName: run.name as string, parameters: config.parameters }];
+    runInfos = [{
+      runId: run.id as string,
+      runName: run.name as string,
+      parameters: config.parameters,
+      modelRuntimeInfo: run.modelRuntimeInfo as RunParamInfo['modelRuntimeInfo'],
+    }];
 
     container.innerHTML = `
       <div id="progress-section"></div>
       <div class="card" id="controls-section"></div>
+      ${renderModelSettingsCard(run)}
       <div class="card" id="graphs-section">
         <div class="card-header">
           <h2>Graphs</h2>

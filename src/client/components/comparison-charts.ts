@@ -7,6 +7,7 @@ export interface RunParamInfo {
   runId: string;
   runName: string;
   parameters?: Record<string, unknown>;
+  modelRuntimeInfo?: Record<string, { args?: string[]; meta?: Record<string, unknown> }>;
 }
 
 interface SeriesEntry {
@@ -39,10 +40,22 @@ function paramsSignature(parameters?: Record<string, unknown>): string {
   return JSON.stringify(Object.entries(parameters).sort(([a], [b]) => a.localeCompare(b)));
 }
 
-function buildSeries(results: ResultRow[], runInfos: Map<string, RunParamInfo>): SeriesEntry[] {
+function argsSignature(args?: string[]): string {
+  return args ? JSON.stringify(args) : '';
+}
+
+export type SplitMode = 'auto' | 'run' | 'model';
+
+function seriesSignature(info: RunParamInfo | undefined, modelId: string, splitMode: SplitMode): string {
+  if (splitMode === 'model') return '';
+  if (splitMode === 'run') return info?.runId || '';
+  return paramsSignature(info?.parameters) + '||' + argsSignature(info?.modelRuntimeInfo?.[modelId]?.args);
+}
+
+function buildSeries(results: ResultRow[], runInfos: Map<string, RunParamInfo>, splitMode: SplitMode): SeriesEntry[] {
   const modelSigs = new Map<string, Set<string>>();
   for (const r of results) {
-    const sig = paramsSignature(runInfos.get(r.runId)?.parameters);
+    const sig = seriesSignature(runInfos.get(r.runId), r.modelId, splitMode);
     if (!modelSigs.has(r.modelId)) modelSigs.set(r.modelId, new Set());
     modelSigs.get(r.modelId)!.add(sig);
   }
@@ -50,7 +63,7 @@ function buildSeries(results: ResultRow[], runInfos: Map<string, RunParamInfo>):
   const seriesMap = new Map<string, SeriesEntry>();
   for (const r of results) {
     const info = runInfos.get(r.runId);
-    const sig = paramsSignature(info?.parameters);
+    const sig = seriesSignature(info, r.modelId, splitMode);
     const key = `${r.modelId}::${sig}`;
     let entry = seriesMap.get(key);
     if (!entry) {
@@ -67,6 +80,31 @@ function buildSeries(results: ResultRow[], runInfos: Map<string, RunParamInfo>):
 function avg(nums: number[]): number {
   if (nums.length === 0) return 0;
   return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function stddev(nums: number[]): number {
+  if (nums.length < 2) return 0;
+  const m = avg(nums);
+  return Math.sqrt(avg(nums.map(v => (v - m) ** 2)));
+}
+
+/**
+ * Consistency (%) of a series across its repeats: 100% means every repeat of every
+ * test produced the same score, lower values mean scores varied between repeats.
+ * Returns `null` if this series has no test with more than one repeat (no data).
+ */
+function consistencyOf(s: SeriesEntry): number | null {
+  const byTest = new Map<string, number[]>();
+  for (const r of s.results) {
+    const score = scoreOf(r);
+    if (score === undefined) continue;
+    if (!byTest.has(r.testName)) byTest.set(r.testName, []);
+    byTest.get(r.testName)!.push(score);
+  }
+  const stddevs = Array.from(byTest.values()).filter(scores => scores.length > 1).map(stddev);
+  if (stddevs.length === 0) return null;
+  // Max stddev for values in [0,1] is 0.5, so *200 maps it onto a 0-100 scale.
+  return Math.max(0, 100 - avg(stddevs) * 200);
 }
 
 function scoreOf(r: ResultRow): number | undefined {
@@ -162,6 +200,65 @@ function buildByTestDatasets(
   }));
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+/** Parses llama.cpp `--flag value` / `--flag` style args into a key/value map. */
+function parseArgs(args?: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!args) return result;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith('--')) continue;
+    const key = a.slice(2);
+    const next = args[i + 1];
+    if (next !== undefined && !next.startsWith('--')) {
+      result[key] = next;
+      i++;
+    } else {
+      result[key] = 'true';
+    }
+  }
+  return result;
+}
+
+// Pure identifiers/connection details that are never a meaningful "setting" to compare.
+const ARGS_NOISE_KEYS = new Set(['model', 'alias', 'port', 'host']);
+// Path-like args worth comparing, but shown by filename only to keep the table readable.
+const ARGS_PATH_KEYS = new Set(['mmproj', 'chat-template-file']);
+
+function basename(p: string): string {
+  return p.split(/[\\/]/).pop() || p;
+}
+
+function settingsOf(s: SeriesEntry, runInfoMap: Map<string, RunParamInfo>): Record<string, string> {
+  const info = runInfoMap.get(s.results[0]?.runId);
+  const rows: Record<string, string> = {};
+  for (const [k, v] of Object.entries(info?.parameters || {})) {
+    rows[`bench: ${k}`] = String(v);
+  }
+  const parsed = parseArgs(info?.modelRuntimeInfo?.[s.modelId]?.args);
+  for (const [k, v] of Object.entries(parsed)) {
+    if (ARGS_NOISE_KEYS.has(k)) continue;
+    rows[`llama: ${k}`] = ARGS_PATH_KEYS.has(k) ? basename(v) : v;
+  }
+  return rows;
+}
+
+/** Returns only the settings (bench parameters + llama.cpp launch args) that differ across series. */
+function buildSettingsDiff(series: SeriesEntry[], runInfoMap: Map<string, RunParamInfo>): { key: string; values: string[] }[] {
+  const perSeries = series.map(s => settingsOf(s, runInfoMap));
+  const allKeys = new Set<string>();
+  perSeries.forEach(r => Object.keys(r).forEach(k => allKeys.add(k)));
+  const rows: { key: string; values: string[] }[] = [];
+  for (const key of allKeys) {
+    const values = perSeries.map(r => r[key] ?? '—');
+    if (new Set(values).size > 1) rows.push({ key, values });
+  }
+  return rows.sort((a, b) => a.key.localeCompare(b.key));
+}
+
 /**
  * Groups model-vs-settings comparison charts into two sections:
  * "Performance" (score, speed, execution time, score by test) and
@@ -169,34 +266,67 @@ function buildByTestDatasets(
  * Each (model, run parameters) combination becomes its own series so the
  * same model run with different settings shows up as separate bars/points.
  */
-export function renderComparisonCharts(container: HTMLElement, results: ResultRow[], runInfos: RunParamInfo[]): void {
+export function renderComparisonCharts(container: HTMLElement, results: ResultRow[], runInfos: RunParamInfo[], splitMode: SplitMode = 'auto'): void {
   const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
-  const series = buildSeries(results, runInfoMap);
+  const series = buildSeries(results, runInfoMap, splitMode);
 
   if (series.length === 0) {
     container.innerHTML = '<p class="text-muted">No data to display for the current selection.</p>';
     return;
   }
 
-  container.innerHTML = `
-    <h2>Performance</h2>
-    <div class="grid-2">
-      <div class="chart-container"><h3>Average Score</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-score"></canvas></div></div>
-      <div class="chart-container"><h3>Average Speed (tokens/s)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-speed"></canvas></div></div>
-      <div class="chart-container"><h3>Total Execution Time (s)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-time"></canvas></div></div>
-      <div class="chart-container"><h3>Score by Test</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-by-test"></canvas></div></div>
-    </div>
+  const hasRepeats = results.some(r => (r.repeatCount ?? 1) > 1);
+  const settingsDiff = series.length > 1 ? buildSettingsDiff(series, runInfoMap) : [];
 
-    <h2 class="mt-1">Cost</h2>
-    <div class="grid-3">
-      <div class="chart-container"><h3>Average Output Tokens</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-gen"></canvas></div></div>
-      <div class="chart-container"><h3>Average Total Tokens (Prompt + Output)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-total"></canvas></div></div>
-      <div class="chart-container"><h3>Average Turn Count</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-turns"></canvas></div></div>
-    </div>
-    <div class="grid-2">
-      <div class="chart-container"><h3>Output Tokens by Test</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-by-test"></canvas></div></div>
-      <div class="chart-container"><h3>Score vs Output Tokens</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-efficiency"></canvas></div></div>
-    </div>
+  container.innerHTML = `
+    ${series.length > 1 ? `
+    <details class="card" open>
+      <summary><h2>Compared Series</h2></summary>
+      ${settingsDiff.length > 0 ? `
+      <p class="text-muted">Settings that differ between the series below:</p>
+      <div style="overflow-x:auto">
+        <table class="stats-table">
+          <thead><tr><th>Setting</th>${series.map(s => `<th>${escapeHtml(s.label)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${settingsDiff.map(row => `<tr><td>${escapeHtml(row.key)}</td>${row.values.map(v => `<td class="text-mono">${escapeHtml(v)}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ` : '<p class="text-muted">No bench-parameter or llama.cpp setting differences detected between the selected series.</p>'}
+    </details>
+    ` : ''}
+
+    <details class="card" open>
+      <summary><h2>Performance</h2></summary>
+      <div class="grid-2">
+        <div class="chart-container"><h3>Average Score</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-score"></canvas></div></div>
+        <div class="chart-container"><h3>Average Speed (tokens/s)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-speed"></canvas></div></div>
+        <div class="chart-container"><h3>Total Execution Time (s)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-time"></canvas></div></div>
+        <div class="chart-container"><h3>Score by Test</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-by-test"></canvas></div></div>
+      </div>
+    </details>
+
+    <details class="card" open>
+      <summary><h2>Cost</h2></summary>
+      <div class="grid-3">
+        <div class="chart-container"><h3>Average Output Tokens</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-gen"></canvas></div></div>
+        <div class="chart-container"><h3>Average Total Tokens (Prompt + Output)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-total"></canvas></div></div>
+        <div class="chart-container"><h3>Average Turn Count</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-turns"></canvas></div></div>
+      </div>
+      <div class="grid-2">
+        <div class="chart-container"><h3>Output Tokens by Test</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-tokens-by-test"></canvas></div></div>
+        <div class="chart-container"><h3>Score vs Output Tokens</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-efficiency"></canvas></div></div>
+      </div>
+    </details>
+
+    ${hasRepeats ? `
+    <details class="card" open>
+      <summary><h2>Consistency</h2></summary>
+      <div class="grid-2">
+        <div class="chart-container"><h3>Score Consistency (%, 100% = identical across repeats)</h3><div class="chart-canvas-wrap"><canvas id="cmp-chart-consistency"></canvas></div></div>
+      </div>
+    </details>
+    ` : ''}
   `;
 
   const labels = series.map(s => s.label);
@@ -305,4 +435,17 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
     options: scatterOptions('Avg Output Tokens', 'Score (%)', { yMin: 0, yMax: 100 }),
     plugins: [darkBgPlugin],
   });
+
+  if (hasRepeats) {
+    const consistencyData = series.map(s => {
+      const c = consistencyOf(s);
+      return c === null ? null : Math.round(c * 10) / 10;
+    });
+    createChart(container.querySelector('#cmp-chart-consistency') as HTMLCanvasElement, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Consistency (%)', data: consistencyData, backgroundColor: colors }] },
+      options: barOptions('Consistency (%)', { min: 0, max: 100 }),
+      plugins: [darkBgPlugin],
+    });
+  }
 }

@@ -45,6 +45,7 @@ runsRouter.post('/', async (req: Request, res: Response) => {
     seed: -1,
     timeout: 300,
     maxTurns: 50,
+    repeatCount: 1,
   };
   config.parameters = { ...defaults, ...config.parameters };
 
