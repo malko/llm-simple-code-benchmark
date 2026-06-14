@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { ResultRow } from '../components/result-types.js';
 import { renderComparisonCharts, RunParamInfo, SplitMode, getDifferingSettingKeys } from '../components/comparison-charts.js';
 import { renderMarkdown, buildStandaloneHtml } from '../components/markdown.js';
+import { initCollapsibleCards } from '../components/collapsible-cards.js';
 
 interface GraphState {
   allResults: ResultRow[];
@@ -95,6 +96,7 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
         </div>
       </details>
     `;
+    initCollapsibleCards(container);
 
     const state: GraphState = {
       allResults: [],

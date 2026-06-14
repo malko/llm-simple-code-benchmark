@@ -1,5 +1,6 @@
 import { Chart, registerables, ChartConfiguration } from 'chart.js';
 import { ResultRow } from './result-types.js';
+import { initCollapsibleCards } from './collapsible-cards.js';
 
 Chart.register(...registerables);
 
@@ -335,26 +336,26 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
   }
 
   const hasRepeats = results.some(r => (r.repeatCount ?? 1) > 1);
-  const settingsDiff = series.length > 1 ? buildSettingsDiff(series, runInfoMap) : [];
+  const settingsRows = series.length > 1
+    ? buildSettingsDiff(series, runInfoMap)
+    : Object.entries(settingsOf(series[0], runInfoMap)).map(([key, value]) => ({ key, values: [value] }));
   const impactGroups = splitSettingKey ? buildSettingImpactGroups(results, runInfos, splitSettingKey) : [];
 
   const mainHtml = `
-    ${series.length > 1 ? `
-    <details class="card" open>
-      <summary><h2>Compared Series</h2></summary>
-      ${settingsDiff.length > 0 ? `
-      <p class="text-muted">Settings that differ between the series below:</p>
+    <details class="card">
+      <summary><h2>Compared LLM Settings</h2></summary>
+      ${settingsRows.length > 0 ? `
+      ${series.length > 1 ? '<p class="text-muted">Settings that differ between the series below:</p>' : ''}
       <div style="overflow-x:auto">
         <table class="stats-table">
           <thead><tr><th>Setting</th>${series.map(s => `<th>${escapeHtml(s.label)}</th>`).join('')}</tr></thead>
           <tbody>
-            ${settingsDiff.map(row => `<tr><td>${escapeHtml(row.key)}</td>${row.values.map(v => `<td class="text-mono">${escapeHtml(v)}</td>`).join('')}</tr>`).join('')}
+            ${settingsRows.map(row => `<tr><td>${escapeHtml(row.key)}</td>${row.values.map(v => `<td class="text-mono">${escapeHtml(v)}</td>`).join('')}</tr>`).join('')}
           </tbody>
         </table>
       </div>
-      ` : '<p class="text-muted">No bench-parameter or llama.cpp setting differences detected between the selected series.</p>'}
+      ` : `<p class="text-muted">${series.length > 1 ? 'No bench-parameter or llama.cpp setting differences detected between the selected series.' : 'No bench-parameter or llama.cpp settings captured for this series.'}</p>`}
     </details>
-    ` : ''}
 
     <details class="card" open>
       <summary><h2>Performance</h2></summary>
@@ -403,6 +404,7 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
   `) : '';
 
   container.innerHTML = mainHtml + impactHtml;
+  initCollapsibleCards(container);
 
   const labels = series.map(s => s.label);
   const colors = series.map((_, i) => colorFor(i, series.length));
