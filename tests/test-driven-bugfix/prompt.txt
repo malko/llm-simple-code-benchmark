@@ -1,0 +1,14 @@
+The TypeScript module `src/textTools.ts` exports two functions, `dedupeWords`
+and `longestWord`. The file `src/textTools.test.ts` is a test file for this
+module — and it currently fails when run.
+
+You have no way to run this test yourself (there is no exec tool available).
+Read `src/textTools.test.ts` carefully to work out exactly what behavior it
+expects, then fix the bug in `src/textTools.ts` so that every check in
+`src/textTools.test.ts` would pass if it were run.
+
+Constraints:
+- Fix `src/textTools.ts` only. Do not modify `src/textTools.test.ts`.
+- Do not change the names, parameters, or return types of `dedupeWords` or
+  `longestWord`.
+- Do not add new files, exports, or dependencies.

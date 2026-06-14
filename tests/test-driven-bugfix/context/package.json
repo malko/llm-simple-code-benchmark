@@ -1,0 +1,7 @@
+{
+  "name": "text-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small text utility functions.",
+  "main": "src/textTools.ts"
+}

@@ -1,0 +1,14 @@
+The TypeScript module `src/mathUtils.ts` exports one function, `clamp`,
+with a JSDoc comment describing its intended behavior, including three
+examples.
+
+`clamp` currently has a bug — it does not match its documented examples.
+Read the doc comment, work out what's wrong, and fix `clamp` so that all
+three documented examples hold.
+
+Constraints:
+- Do not change the function's name, parameters, or return type.
+- Do not change the behavior described by the doc comment — only fix the
+  implementation to match it.
+- Do not add new exports, files, or dependencies, and don't move/rename
+  `src/mathUtils.ts`.

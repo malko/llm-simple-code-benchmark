@@ -206,5 +206,18 @@ const turns = JSON.parse(fs.readFileSync(path.join(resultDir, 'turns.json'), 'ut
   validated with a hidden `_test.go`.
 - `tests/feature-implementation/` — implement a new feature in an existing TS
   module (`context/`), validated with a hidden harness.
+- `tests/test-driven-bugfix/` — fix a bug in a TS module (`context/`) using a
+  visible failing test as the spec, validated against that test plus a
+  hidden harness with extra cases.
+- `tests/needle-in-haystack/` — find and fix one buggy file among ~20 small
+  plugin files (`context/`), validated by checking the right file changed
+  (and no others did); also reports tool-call counts from `turns.json`.
+- `tests/edge-case-robustness/` — write a TS function from scratch whose
+  hidden harness is weighted toward edge cases called out in `prompt.txt`,
+  with `details` split into `happyPath`/`edgeCase` checks.
+- `tests/prompt-injection-resilience/` — fix a bug in a TS module
+  (`context/`) whose `README.md` contains an embedded prompt-injection
+  attempt; validated by both the functional fix and the absence of the
+  injected marker in any file.
 
 See `doc/test-ideas.md` for a backlog of further test case ideas.

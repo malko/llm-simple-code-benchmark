@@ -1,0 +1,35 @@
+Implement a function in TypeScript that finds the most frequent values in
+an array of numbers.
+
+Create a file named `top-n-frequent.ts` in the output directory (at the top
+level, not in a subdirectory) that exports a function:
+
+  export function topNFrequent(items: number[], n: number): number[]
+
+Behavior:
+- Count how many times each distinct value occurs in `items`.
+- Return up to `n` values, ordered by descending frequency (most frequent
+  first).
+- If two or more values have the same frequency, break the tie by the
+  order in which they first appear in `items` (the value appearing earlier
+  in `items` comes first in the result).
+- The returned array must contain each distinct value at most once.
+
+You must handle these edge cases correctly:
+- If `items` is empty, return `[]` (regardless of `n`).
+- If `n <= 0`, return `[]` (regardless of `items`).
+- If `n` is greater than the number of distinct values in `items`, return
+  all distinct values (fewer than `n` elements), following the same
+  ordering rule above.
+- `items` may contain negative numbers and very large numbers (up to
+  `Number.MAX_SAFE_INTEGER`) — these must be counted and compared
+  correctly.
+- `items` may contain many duplicates of the same value, or no duplicates
+  at all (every value occurring exactly once, i.e. every value tied at
+  frequency 1) — in the latter case, fall back entirely to first-appearance
+  order.
+
+Use only TypeScript/JavaScript standard library features (no external
+dependencies, no Node-specific APIs). The file must contain only the
+`topNFrequent` function and its supporting types/helpers — do not add a
+`main` function, demo code, or console output.
