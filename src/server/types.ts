@@ -66,7 +66,7 @@ export interface TestResult {
   runId: string;
   testName: string;
   modelId: string;
-  status: 'running' | 'passed' | 'failed' | 'error' | 'cancelled';
+  status: 'running' | 'passed' | 'failed' | 'error' | 'cancelled' | 'skipped';
   startedAt: string;
   completedAt?: string;
   stats: TestStats;

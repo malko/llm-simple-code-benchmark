@@ -92,7 +92,18 @@ export class RunEmitter extends EventEmitter {
 }
 
 export const runEmitter = new RunEmitter();
-const activeRuns = new Map<string, AbortController>();
+
+interface RunControl {
+  abortController: AbortController;
+  current: { key: string; controller: AbortController } | null;
+  skipSet: Set<string>;
+}
+
+const activeRuns = new Map<string, RunControl>();
+
+function makeTestKey(modelId: string, testName: string, repeatIndex?: number): string {
+  return `${modelId}::${testName}::${repeatIndex ?? ''}`;
+}
 
 async function waitForModelReady(modelId: string, settings: Settings, signal: AbortSignal, timeoutMs = 120000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -112,7 +123,7 @@ async function switchToModel(modelId: string, settings: Settings, signal: AbortS
   if (target?.status !== 'loaded') {
     const others = models.filter(m => m.id !== modelId && m.status === 'loaded');
     await Promise.all(others.map(m => llamaclient.unloadModel(m.id, settings).catch(() => {})));
-    await llamaclient.loadModel(modelId, settings);
+    await llamaclient.loadModel(modelId, settings, signal);
     await waitForModelReady(modelId, settings, signal);
   }
   // Re-fetch so we capture the loaded model's runtime args + GGUF meta (only populated once loaded).
@@ -229,7 +240,7 @@ export const runner = {
   async start(config: RunConfig): Promise<Run> {
     const id = `${new Date().toISOString().replace(/[:.]/g, '-')}_${config.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
     const abortController = new AbortController();
-    activeRuns.set(id, abortController);
+    activeRuns.set(id, { abortController, current: null, skipSet: new Set() });
 
     const run: Run = {
       id,
@@ -258,7 +269,7 @@ export const runner = {
   cancel(id: string): boolean {
     const ctrl = activeRuns.get(id);
     if (ctrl) {
-      ctrl.abort();
+      ctrl.abortController.abort();
       activeRuns.delete(id);
       return true;
     }
@@ -269,7 +280,20 @@ export const runner = {
     return activeRuns.has(id);
   },
 
+  skipTest(id: string, testName: string, modelId: string, repeatIndex?: number): boolean {
+    const ctrl = activeRuns.get(id);
+    if (!ctrl) return false;
+    const key = makeTestKey(modelId, testName, repeatIndex);
+    if (ctrl.current?.key === key) {
+      ctrl.current.controller.abort();
+    } else {
+      ctrl.skipSet.add(key);
+    }
+    return true;
+  },
+
   async execute(runId: string, config: RunConfig, signal: AbortSignal): Promise<void> {
+    const ctrl = activeRuns.get(runId);
     try {
       const settings = await storage.getSettings();
       const run = await storage.getRun(runId);
@@ -287,9 +311,18 @@ export const runner = {
           modelId, modelIndex: mi, totalModels: config.modelIds.length,
         });
 
+        const switchController = new AbortController();
+        if (ctrl) {
+          ctrl.current = {
+            key: makeTestKey(modelId, config.testNames[0], repeatCount > 1 ? 1 : undefined),
+            controller: switchController,
+          };
+        }
+        const switchSignal = AbortSignal.any([signal, switchController.signal]);
+
         let modelInfo: ModelInfo | undefined;
         try {
-          modelInfo = await switchToModel(modelId, settings, signal);
+          modelInfo = await switchToModel(modelId, settings, switchSignal);
         } catch (err) {
           for (let ti = 0; ti < config.testNames.length; ti++) {
             const testName = config.testNames[ti];
@@ -326,6 +359,33 @@ export const runner = {
             if (signal.aborted) { await finalizeRun(runId, 'cancelled'); return; }
 
             const dirRepeat = repeatCount > 1 ? ri : undefined;
+            const key = makeTestKey(modelId, testName, dirRepeat);
+
+            if (ctrl?.skipSet.delete(key)) {
+              const now = new Date().toISOString();
+              const skipped: TestResult = {
+                runId,
+                testName,
+                modelId,
+                status: 'skipped',
+                startedAt: now,
+                completedAt: now,
+                stats: {
+                  turnCount: 0, tokenGeneratedCount: 0, promptTokensCount: 0,
+                  promptProcessingSpeed: 0, tokenGenerationSpeed: 0,
+                  elapsedMs: 0, promptMs: 0, predictedMs: 0,
+                },
+                testOutput: {},
+                outputPath: storage.getTestOutputDir(runId, testName, modelId, dirRepeat),
+                repeatIndex: dirRepeat,
+                repeatCount,
+              };
+              runEmitter.emitTestStart(runId, { testName, modelId, repeatIndex: ri, repeatCount });
+              await storage.saveResult(runId, testName, modelId, skipped, dirRepeat);
+              completedSteps = await finishTestStep(runId, run, skipped, mi, ti, ri, repeatCount, config, completedSteps, totalSteps);
+              continue;
+            }
+
             const outputDir = storage.getTestOutputDir(runId, testName, modelId, dirRepeat);
             const resultDir = storage.getResultDir(runId, testName, modelId, dirRepeat);
             await fs.mkdir(outputDir, { recursive: true });
@@ -349,9 +409,13 @@ export const runner = {
             };
             runEmitter.emitTestStart(runId, { testName, modelId, repeatIndex: ri, repeatCount });
 
+            const testController = new AbortController();
+            if (ctrl) ctrl.current = { key, controller: testController };
+            const testSignal = AbortSignal.any([signal, testController.signal]);
+
             try {
               const { messages, stats } = await chatLoop(
-                modelId, test.prompt, toolDefinitions, outputDir, config.parameters, signal, settings,
+                modelId, test.prompt, toolDefinitions, outputDir, config.parameters, testSignal, settings,
               );
 
               result.stats = stats;
@@ -370,6 +434,8 @@ export const runner = {
               result.completedAt = new Date().toISOString();
               if (signal.aborted) {
                 result.status = 'cancelled';
+              } else if (testController.signal.aborted) {
+                result.status = 'skipped';
               } else {
                 result.status = 'error';
                 result.error = (err as Error).message;
@@ -377,26 +443,7 @@ export const runner = {
               await storage.saveResult(runId, testName, modelId, result, dirRepeat);
             }
 
-            run.results.push(result);
-            completedSteps++;
-            run.progress = {
-              currentModelIndex: mi,
-              currentTestIndex: ti,
-              totalModels: config.modelIds.length,
-              totalTests: config.testNames.length,
-              currentModelId: modelId,
-              currentTestName: testName,
-              currentOperation: result.status,
-              percentage: Math.round((completedSteps / totalSteps) * 100),
-              currentRepeatIndex: ri,
-              totalRepeats: repeatCount,
-            };
-            await storage.saveRun(run);
-
-            runEmitter.emitTestEnd(runId, {
-              testName, modelId, status: result.status, stats: result.stats, repeatIndex: ri, repeatCount,
-            });
-            runEmitter.emitProgress(runId, run.progress as unknown as Record<string, unknown>);
+            completedSteps = await finishTestStep(runId, run, result, mi, ti, ri, repeatCount, config, completedSteps, totalSteps);
           }
         }
       }
@@ -414,6 +461,38 @@ export const runner = {
     }
   },
 };
+
+async function finishTestStep(
+  runId: string,
+  run: Run,
+  result: TestResult,
+  mi: number,
+  ti: number,
+  ri: number,
+  repeatCount: number,
+  config: RunConfig,
+  completedSteps: number,
+  totalSteps: number,
+): Promise<number> {
+  run.results.push(result);
+  const newCompleted = completedSteps + 1;
+  run.progress = {
+    currentModelIndex: mi,
+    currentTestIndex: ti,
+    totalModels: config.modelIds.length,
+    totalTests: config.testNames.length,
+    currentModelId: config.modelIds[mi],
+    currentTestName: config.testNames[ti],
+    currentOperation: result.status,
+    percentage: Math.round((newCompleted / totalSteps) * 100),
+    currentRepeatIndex: ri,
+    totalRepeats: repeatCount,
+  };
+  await storage.saveRun(run);
+  runEmitter.emitTestEnd(runId, result as unknown as Record<string, unknown>);
+  runEmitter.emitProgress(runId, run.progress as unknown as Record<string, unknown>);
+  return newCompleted;
+}
 
 async function finalizeRun(runId: string, status: Run['status'], error?: string): Promise<void> {
   const run = await storage.getRun(runId);

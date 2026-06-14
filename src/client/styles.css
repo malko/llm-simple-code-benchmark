@@ -231,6 +231,7 @@ tr:hover { background: rgba(255,255,255,0.03); }
 .badge-error { background: rgba(244,67,54,0.2); color: var(--error); }
 .badge-cancelled { background: rgba(170,170,170,0.2); color: var(--text2); }
 .badge-pending { background: rgba(170,170,170,0.2); color: var(--text2); }
+.badge-skipped { background: rgba(170,170,170,0.2); color: var(--text2); }
 
 .progress-bar {
   width: 100%;

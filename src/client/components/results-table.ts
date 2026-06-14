@@ -3,6 +3,8 @@ import { renderResultDetail } from './result-detail.js';
 
 export interface ResultsTableOptions {
   showRunColumn?: boolean;
+  /** When provided, adds an "Action" column with Skip/Stop buttons for pending/running rows. */
+  onSkip?: (row: ResultRow) => void;
 }
 
 const COLUMN_COUNT_BASE = 8; // Test, Model, Run, Status, Score, Speed, Tokens, Time
@@ -25,6 +27,16 @@ export function buildResultRowPair(row: ResultRow, opts: ResultsTableOptions = {
   tr.dataset.model = row.modelId;
 
   const stats = row.stats;
+  let actionCell = '';
+  if (opts.onSkip) {
+    if (row.status === 'pending') {
+      actionCell = '<td><button class="btn btn-sm skip-btn">Skip</button></td>';
+    } else if (row.status === 'running') {
+      actionCell = '<td><button class="btn btn-sm btn-danger stop-btn">Stop</button></td>';
+    } else {
+      actionCell = '<td></td>';
+    }
+  }
   tr.innerHTML = `
     ${opts.showRunColumn ? `<td>${row.runName}</td>` : ''}
     <td>${row.testName}</td>
@@ -35,13 +47,21 @@ export function buildResultRowPair(row: ResultRow, opts: ResultsTableOptions = {
     <td class="text-mono">${stats?.tokenGenerationSpeed?.toFixed(1) ?? '—'} t/s</td>
     <td class="text-mono">${stats?.tokenGeneratedCount ?? '—'}</td>
     <td class="text-mono">${stats?.elapsedMs ? (stats.elapsedMs / 1000).toFixed(1) + 's' : '—'}</td>
+    ${actionCell}
   `;
+
+  if (opts.onSkip) {
+    tr.querySelector('.skip-btn, .stop-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      opts.onSkip!(row);
+    });
+  }
 
   const detailTr = document.createElement('tr');
   detailTr.className = 'result-detail-row';
   detailTr.style.display = 'none';
   const detailTd = document.createElement('td');
-  detailTd.colSpan = COLUMN_COUNT_BASE + (opts.showRunColumn ? 1 : 0);
+  detailTd.colSpan = COLUMN_COUNT_BASE + (opts.showRunColumn ? 1 : 0) + (opts.onSkip ? 1 : 0);
   detailTr.appendChild(detailTd);
 
   tr.addEventListener('click', () => {
@@ -82,6 +102,7 @@ export function buildResultsTable(results: ResultRow[], opts: ResultsTableOption
         <th>Speed</th>
         <th>Tokens</th>
         <th>Time</th>
+        ${opts.onSkip ? '<th>Action</th>' : ''}
       </tr>
     </thead>
     <tbody></tbody>

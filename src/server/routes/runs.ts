@@ -81,6 +81,21 @@ runsRouter.post('/:id/cancel', async (req: Request, res: Response) => {
   }
 });
 
+runsRouter.post('/:id/skip-test', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { testName, modelId, repeatIndex } = req.body as { testName?: string; modelId?: string; repeatIndex?: number };
+  if (!testName || !modelId) {
+    res.status(400).json({ error: 'testName and modelId are required' });
+    return;
+  }
+  const ok = runner.skipTest(id, testName, modelId, repeatIndex);
+  if (ok) {
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: 'Run not found or not running' });
+  }
+});
+
 runsRouter.get('/:id/events', (req: Request, res: Response) => {
   const { id } = req.params;
 

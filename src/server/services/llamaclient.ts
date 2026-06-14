@@ -89,14 +89,15 @@ export const llamaclient = {
     return res.json();
   },
 
-  async loadModel(modelId: string, settings?: Settings): Promise<void> {
+  async loadModel(modelId: string, settings?: Settings, signal?: AbortSignal): Promise<void> {
     const url = resolveUrl(settings);
     const headers = resolveHeaders(settings);
+    const timeout = AbortSignal.timeout(60000);
     const res = await fetch(`${url}/models/load`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ model: modelId }),
-      signal: AbortSignal.timeout(60000),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

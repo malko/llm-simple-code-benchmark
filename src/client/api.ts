@@ -38,6 +38,11 @@ export const api = {
     }),
   cancelRun: (id: string) =>
     request<{ success: boolean }>(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  skipTest: (id: string, testName: string, modelId: string, repeatIndex?: number) =>
+    request<{ success: boolean }>(`/runs/${encodeURIComponent(id)}/skip-test`, {
+      method: 'POST',
+      body: JSON.stringify({ testName, modelId, repeatIndex }),
+    }),
   deleteRun: (id: string) =>
     request<{ success: boolean }>(`/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   runEvents: (id: string): EventSource =>
