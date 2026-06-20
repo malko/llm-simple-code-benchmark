@@ -15,7 +15,9 @@ runsRouter.get('/', async (_req: Request, res: Response) => {
     progress: r.progress,
     modelCount: r.config.modelIds.length,
     testCount: r.config.testNames.length,
+    repeatCount: Math.max(1, r.config.parameters?.repeatCount || 1),
     resultCount: r.results.length,
+    passedCount: r.results.filter(res => res.status === 'passed').length,
   })).reverse();
   res.json({ data: summary });
 });

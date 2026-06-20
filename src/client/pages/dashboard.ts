@@ -37,18 +37,21 @@ export async function renderDashboard(): Promise<HTMLElement> {
         </div>
         ${runs.length === 0 ? '<p>No runs yet. <a href="#/run" data-nav>Create your first run</a>.</p>' : `
         <table>
-          <thead><tr><th>Name</th><th>Status</th><th>Progress</th><th>Results</th><th>Date</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Status</th><th>Progress</th><th>Passed</th><th>Date</th><th></th></tr></thead>
           <tbody>
-            ${runs.slice(0, 10).map(r => `
-              <tr>
-                <td><a href="#/run/${r.id}" data-nav>${r.name}</a></td>
-                <td><span class="badge badge-${r.status}">${r.status}</span></td>
-                <td>${r.progress?.percentage ?? 0}%</td>
-                <td>${r.resultCount}/${r.modelCount * r.testCount}</td>
-                <td>${new Date(r.createdAt).toLocaleDateString()}</td>
-                <td><button class="btn btn-sm btn-danger delete-run" data-id="${r.id}" data-name="${r.name}">Delete</button></td>
-              </tr>
-            `).join('')}
+            ${runs.slice(0, 10).map(r => {
+              const total = r.modelCount * r.testCount * (r.repeatCount ?? 1);
+              const passed = r.passedCount ?? 0;
+              const date = new Date(r.createdAt).toLocaleDateString();
+              return '<tr>'
+                + `<td><a href="#/run/${r.id}" data-nav>${r.name}</a></td>`
+                + `<td><span class="badge badge-${r.status}">${r.status}</span></td>`
+                + `<td>${r.progress?.percentage ?? 0}%</td>`
+                + `<td>${passed}/${total}</td>`
+                + `<td>${date}</td>`
+                + `<td><button class="btn btn-sm btn-danger delete-run" data-id="${r.id}" data-name="${r.name}">Delete</button></td>`
+                + '</tr>';
+            }).join('')}
           </tbody>
         </table>
         `}

@@ -29,7 +29,7 @@ export const api = {
   health: () => request<{ status: string }>('/models/health'),
 
   // Runs
-  listRuns: () => request<{ data: { id: string; name: string; status: string; createdAt: string; progress: Record<string, unknown>; modelCount: number; testCount: number; resultCount: number }[] }>('/runs'),
+  listRuns: () => request<{ data: { id: string; name: string; status: string; createdAt: string; progress: Record<string, unknown>; modelCount: number; testCount: number; repeatCount: number; resultCount: number; passedCount: number }[] }>('/runs'),
   getRun: (id: string) => request<Record<string, unknown>>(`/runs/${encodeURIComponent(id)}`),
   createRun: (config: Record<string, unknown>) =>
     request<Record<string, unknown>>('/runs', {
