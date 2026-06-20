@@ -1,4 +1,7 @@
-# LLM Code Bench
+<div align="center">
+  <img src="src/client/logo.svg" width="72" height="72" alt="LLM Code Bench logo">
+  <h1>LLM Code Bench</h1>
+</div>
 
 A web-based tool for benchmarking LLMs on coding tasks by running test prompts against models served by a [llama.cpp](https://github.com/ggml-org/llama.cpp) HTTP server.
 
@@ -27,6 +30,16 @@ A web-based tool for benchmarking LLMs on coding tasks by running test prompts a
 - AI-generated analysis reports across runs
 - Settings UI to configure llama server URL and API key (persisted, override env vars)
 - SQLite for run metadata and settings; test definitions and results on the filesystem
+
+## Screenshots
+
+| Dashboard | Results browser |
+|:---------:|:---------------:|
+| ![Dashboard](doc/screenshots/dashboard.png) | ![Results](doc/screenshots/results.png) |
+
+| Test list | Comparison graphs |
+|:---------:|:-----------------:|
+| ![Tests](doc/screenshots/tests.png) | ![Graphs](doc/screenshots/graphs.png) |
 
 ## Quick Start
 

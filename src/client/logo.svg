@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#16213e"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="48" height="48" rx="10" fill="url(#bg)"/>
+
+  <!-- < chevron -->
+  <polyline points="12,10 5,24 12,38"
+    stroke="#e94560" stroke-width="3.5"
+    stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- > chevron -->
+  <polyline points="36,10 43,24 36,38"
+    stroke="#e94560" stroke-width="3.5"
+    stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Benchmark bars, all anchored to baseline y=38 -->
+  <rect x="15" y="26" width="5" height="12" rx="1.5" fill="#533483"/>
+  <rect x="22" y="13" width="5" height="25" rx="1.5" fill="#e94560"/>
+  <rect x="29" y="20" width="5" height="18" rx="1.5" fill="#533483"/>
+</svg>

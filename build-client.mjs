@@ -10,7 +10,7 @@ const distClient = path.join(__dirname, 'dist/client');
 await fs.mkdir(distClient, { recursive: true });
 
 // Copy static assets
-const files = ['index.html', 'styles.css'];
+const files = ['index.html', 'styles.css', 'logo.svg'];
 await Promise.all(files.map(f =>
   fs.copyFile(path.join(srcClient, f), path.join(distClient, f))
 ));
