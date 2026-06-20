@@ -90,6 +90,7 @@ export function buildResultRowPair(row: ResultRow, opts: ResultsTableOptions = {
 
 export function buildResultsTable(results: ResultRow[], opts: ResultsTableOptions = {}): HTMLTableElement {
   const table = document.createElement('table');
+  table.className = 'results-table';
   table.innerHTML = `
     <thead>
       <tr>

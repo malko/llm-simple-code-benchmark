@@ -61,6 +61,26 @@ resultsRouter.get('/:runId/:testName/:modelId/file', async (req: Request, res: R
   res.json({ path: filePath, content });
 });
 
+resultsRouter.get('/:runId/:testName/:modelId/turns', async (req: Request, res: Response) => {
+  const { runId, testName, modelId } = req.params;
+  const turns = await storage.getTurns(runId, testName, modelId, parseRepeat(req.query.repeat));
+  if (turns === null) {
+    res.status(404).json({ error: 'turns.json not found' });
+    return;
+  }
+  res.json({ data: turns });
+});
+
+resultsRouter.get('/:runId/:testName/:modelId/raw', async (req: Request, res: Response) => {
+  const { runId, testName, modelId } = req.params;
+  const result = await storage.getResult(runId, testName, modelId, parseRepeat(req.query.repeat));
+  if (!result) {
+    res.status(404).json({ error: 'results.json not found' });
+    return;
+  }
+  res.json(result);
+});
+
 resultsRouter.get('/stats', async (_req: Request, res: Response) => {
   const runs = await storage.listRuns();
   const stats = {

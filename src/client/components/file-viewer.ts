@@ -26,7 +26,13 @@ export async function renderFileViewer(
     return container;
   }
 
-  files.sort();
+  files.sort((a, b) => {
+    const aDir = a.includes('/') ? a.slice(0, a.lastIndexOf('/')) : '';
+    const bDir = b.includes('/') ? b.slice(0, b.lastIndexOf('/')) : '';
+    if (aDir && !bDir) return -1;
+    if (!aDir && bDir) return 1;
+    return a.localeCompare(b);
+  });
 
   container.innerHTML = `
     <div class="file-viewer-layout">

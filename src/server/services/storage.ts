@@ -168,6 +168,16 @@ export const storage = {
     await fs.writeFile(path.join(resultDir, 'turns.json'), JSON.stringify(turns, null, 2), 'utf-8');
   },
 
+  async getTurns(runId: string, testName: string, modelId: string, repeatIndex?: number): Promise<unknown[] | null> {
+    const resultDir = this.getResultDir(runId, testName, modelId, repeatIndex);
+    try {
+      const data = await fs.readFile(path.join(resultDir, 'turns.json'), 'utf-8');
+      return JSON.parse(data);
+    } catch {
+      return null;
+    }
+  },
+
   getResultDir(runId: string, testName: string, modelId: string, repeatIndex?: number): string {
     const safeModel = modelId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const suffix = repeatIndex !== undefined ? `_r${repeatIndex}` : '';

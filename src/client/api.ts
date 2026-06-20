@@ -59,6 +59,10 @@ export const api = {
     request<{ data: string[] }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/files${repeat !== undefined ? `?repeat=${repeat}` : ''}`),
   getResultFileContent: (runId: string, testName: string, modelId: string, filePath: string, repeat?: number) =>
     request<{ path: string; content: string }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/file?path=${encodeURIComponent(filePath)}${repeat !== undefined ? `&repeat=${repeat}` : ''}`),
+  getResultTurns: (runId: string, testName: string, modelId: string, repeat?: number) =>
+    request<{ data: unknown[] }>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/turns${repeat !== undefined ? `?repeat=${repeat}` : ''}`),
+  getRawResult: (runId: string, testName: string, modelId: string, repeat?: number) =>
+    request<Record<string, unknown>>(`/results/${encodeURIComponent(runId)}/${encodeURIComponent(testName)}/${encodeURIComponent(modelId)}/raw${repeat !== undefined ? `?repeat=${repeat}` : ''}`),
   getStats: () => request<Record<string, number>>('/results/stats'),
 
   // Reports
