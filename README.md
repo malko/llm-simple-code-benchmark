@@ -6,7 +6,9 @@
 A web-based tool for benchmarking LLMs on coding tasks by running test prompts against models served by a [llama.cpp](https://github.com/ggml-org/llama.cpp) HTTP server.
 
 > **Personal tool, not production software.**
-> This project is built for a single use case: a llama.cpp server reachable on a local network (home lab, LAN). Authentication, multi-user support, and cloud inference providers are out of scope — there is no plan to cover those cases. The code is open source in case it is useful to others in a similar setup.
+> Built to answer a concrete question: which local model, with which settings, actually works best as a coding agent — not based on gut feeling, but on repeatable, measurable results. The secondary goal is to quantify how generation parameters (temperature, repeat penalty, context size…) affect a model's ability to handle real coding tasks.
+>
+> The scope is intentionally narrow: a single llama.cpp server on a local network (home lab, LAN). Authentication, multi-user support, and cloud inference providers are out of scope. The code is open source in case it is useful to others in a similar setup.
 
 ## License
 
@@ -164,7 +166,28 @@ During a test run the model agent has these tools, scoped to its `files/` direct
 
 ## Requirements
 
-- Node.js LTS
-- A running [llama.cpp](https://github.com/ggml-org/llama.cpp) HTTP server in router mode (`--models-dir`)
-- Docker (optional)
-- `bwrap` (optional) — enables filesystem sandboxing for `run_command`
+**To run:** Docker + a [llama.cpp](https://github.com/ggml-org/llama.cpp) HTTP server in router mode (`--models-dir`). That's it.
+
+**To build / develop locally:** Node.js LTS (no Docker needed, see Quick Start above).
+
+`bwrap` (optional, Linux only) — when present in the container, enables filesystem sandboxing for the `run_command` tool.
+
+## Included Test Cases
+
+The repository ships with 9 test cases covering the scenarios that matter most for a coding agent:
+
+| Test | Description |
+|------|-------------|
+| `typescript-codegen` | Generate a TypeScript class from a spec |
+| `typescript-bugfix` | Fix a broken TypeScript snippet |
+| `golang-codegen` | Generate a Go function from a spec |
+| `golang-bugfix` | Fix a broken Go snippet |
+| `feature-implementation` | Implement a small feature in an existing codebase |
+| `test-driven-bugfix` | Fix a bug guided by a failing test |
+| `edge-case-robustness` | Handle tricky edge cases correctly |
+| `needle-in-haystack` | Locate a specific detail buried in a large context |
+| `prompt-injection-resilience` | Resist instructions hidden inside user-supplied input |
+
+**The default Docker image bundles `tsc` (TypeScript) and the Go toolchain**, so these tests work out of the box without any extra setup. If there is demand for other languages, toolchain support can be added to the default build — open an issue to discuss.
+
+PRs adding new test cases are welcome. A good test case targets a concrete, verifiable coding skill, includes a prompt and a TypeScript validation script, and ideally comes with a `context/` directory when the task involves an existing codebase. See [doc/writing-test-cases.md](./doc/writing-test-cases.md) for the format.
