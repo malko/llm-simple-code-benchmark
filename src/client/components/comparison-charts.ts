@@ -46,6 +46,7 @@ function argsSignature(args?: string[]): string {
 }
 
 export type SplitMode = 'auto' | 'run' | 'model';
+export type ViewMode = 'auto' | 'model' | 'run' | 'setting';
 
 function seriesSignature(info: RunParamInfo | undefined, modelId: string, splitMode: SplitMode): string {
   if (splitMode === 'model') return '';
@@ -265,15 +266,29 @@ export function buildSettingsDiff(series: SeriesEntry[], runInfoMap: Map<string,
 }
 
 /**
- * Returns the list of bench-parameter / llama.cpp setting keys that differ across the
- * selected results (using "auto" series, i.e. one series per unique settings combination).
- * Used to populate the "Split charts by setting" selector.
+ * Returns only the setting keys for which at least one model was run more than once
+ * with different values — i.e. keys that will actually produce impact groups in the
+ * "Setting impact" view. Keys that differ only across models are excluded.
  */
-export function getDifferingSettingKeys(results: ResultRow[], runInfos: RunParamInfo[]): string[] {
+export function getImpactableSettingKeys(results: ResultRow[], runInfos: RunParamInfo[]): string[] {
   const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
   const series = buildSeries(results, runInfoMap, 'auto');
-  if (series.length < 2) return [];
-  return buildSettingsDiff(series, runInfoMap).map(row => row.key);
+  const byModel = new Map<string, SeriesEntry[]>();
+  for (const s of series) {
+    if (!byModel.has(s.modelId)) byModel.set(s.modelId, []);
+    byModel.get(s.modelId)!.push(s);
+  }
+  const keys = new Set<string>();
+  for (const modelSeries of byModel.values()) {
+    if (modelSeries.length < 2) continue;
+    const allSettings = modelSeries.map(s => settingsOf(s, runInfoMap));
+    const allKeys = new Set(allSettings.flatMap(s => Object.keys(s)));
+    for (const key of allKeys) {
+      const vals = new Set(allSettings.map(s => s[key] ?? '—'));
+      if (vals.size > 1) keys.add(key);
+    }
+  }
+  return Array.from(keys).sort();
 }
 
 function isNumericValue(s: string): boolean {
@@ -294,29 +309,124 @@ export interface SettingImpactGroup {
 }
 
 /**
- * Groups "auto" series by (model + all settings except `key`), keeping only groups where
- * `key` actually takes more than one value — isolating the effect of varying just that
- * one setting while everything else (model, other bench params, llama.cpp args) stays fixed.
+ * Groups "auto" series by model, keeping only groups where `key` takes more than one
+ * value across the series for that model. Other settings may differ between items;
+ * `contextSettings` captures only the settings that are identical across all items.
  */
 export function buildSettingImpactGroups(results: ResultRow[], runInfos: RunParamInfo[], key: string): SettingImpactGroup[] {
   const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
   const series = buildSeries(results, runInfoMap, 'auto');
-  const groups = new Map<string, SettingImpactGroup>();
+
+  const byModel = new Map<string, { value: string; settings: Record<string, string>; series: SeriesEntry }[]>();
   for (const s of series) {
     const settings = settingsOf(s, runInfoMap);
     const value = settings[key] ?? '—';
-    const others = Object.fromEntries(Object.entries(settings).filter(([k]) => k !== key));
-    const groupKey = `${s.modelId}::${JSON.stringify(Object.entries(others).sort())}`;
-    let group = groups.get(groupKey);
-    if (!group) {
-      group = { modelId: s.modelId, contextSettings: others, items: [] };
-      groups.set(groupKey, group);
-    }
-    group.items.push({ value, series: s });
+    if (!byModel.has(s.modelId)) byModel.set(s.modelId, []);
+    byModel.get(s.modelId)!.push({ value, settings, series: s });
   }
-  return Array.from(groups.values())
-    .filter(g => new Set(g.items.map(i => i.value)).size > 1)
-    .map(g => ({ ...g, items: g.items.slice().sort((a, b) => compareSettingValues(a.value, b.value)) }));
+
+  const groups: SettingImpactGroup[] = [];
+  for (const [modelId, items] of byModel) {
+    if (new Set(items.map(i => i.value)).size <= 1) continue;
+    // contextSettings = settings (other than key) that are constant across all items
+    const otherKeys = new Set(items.flatMap(i => Object.keys(i.settings).filter(k => k !== key)));
+    const contextSettings: Record<string, string> = {};
+    for (const k of otherKeys) {
+      const vals = new Set(items.map(i => i.settings[k] ?? '—'));
+      if (vals.size === 1) contextSettings[k] = [...vals][0];
+    }
+    // Merge series that share the same value for the key into one bar.
+    const valueMap = new Map<string, ResultRow[]>();
+    for (const { value, series: s } of items) {
+      if (!valueMap.has(value)) valueMap.set(value, []);
+      valueMap.get(value)!.push(...s.results);
+    }
+    const mergedItems = Array.from(valueMap.entries())
+      .sort(([a], [b]) => compareSettingValues(a, b))
+      .map(([value, results]) => ({
+        value,
+        series: { key: `${modelId}::${value}`, label: value, modelId, results } as SeriesEntry,
+      }));
+    groups.push({ modelId, contextSettings, items: mergedItems });
+  }
+  return groups;
+}
+
+function buildSettingsCardHtml(
+  settingsRows: { key: string; values: string[] }[],
+  autoSeries: SeriesEntry[],
+  runInfoMap: Map<string, RunParamInfo>,
+  viewMode: ViewMode,
+  chartSeries: SeriesEntry[],
+): string {
+  // Colors derived from chartSeries so they match the bars exactly.
+  const seriesColor = (key: string, modelId: string): string => {
+    const byKey = chartSeries.findIndex(s => s.key === key);
+    if (byKey >= 0) return colorFor(byKey, chartSeries.length);
+    const byModel = chartSeries.findIndex(s => s.modelId === modelId);
+    return colorFor(byModel >= 0 ? byModel : 0, Math.max(chartSeries.length, 1));
+  };
+
+  // In "by model" mode with intra-model variation: one column per model, cells show all values.
+  const modelIds = Array.from(new Set(autoSeries.map(s => s.modelId)));
+  const useModelCols = viewMode === 'model' && modelIds.length < autoSeries.length;
+
+  if (useModelCols) {
+    const cols = modelIds.map(modelId => {
+      const modelSeries = autoSeries.filter(s => s.modelId === modelId);
+      const byKey = new Map<string, Set<string>>();
+      for (const s of modelSeries) {
+        for (const [k, v] of Object.entries(settingsOf(s, runInfoMap))) {
+          if (!byKey.has(k)) byKey.set(k, new Set());
+          byKey.get(k)!.add(v);
+        }
+      }
+      const repKey = chartSeries.find(s => s.modelId === modelId)?.key ?? modelId;
+      return { modelId, label: shortModelName(modelId), byKey, color: seriesColor(repKey, modelId) };
+    });
+
+    const diffRows = settingsRows.map(({ key }) => {
+      const cells = cols.map(col => {
+        const vals = [...(col.byKey.get(key) ?? new Set(['—']))].sort(compareSettingValues);
+        return { vals, varies: vals.length > 1 };
+      });
+      return { key, cells };
+    });
+
+    return `
+      <details class="card">
+        <summary><h2>Compared LLM Settings</h2></summary>
+        <p class="text-muted">Settings per model. Highlighted cells indicate the setting varied across multiple runs of that model.</p>
+        <div style="overflow-x:auto">
+          <table class="stats-table">
+            <thead><tr><th>Setting</th>${cols.map(c => `<th style="border-top:3px solid ${c.color}">${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
+            <tbody>
+              ${diffRows.map(row => `<tr><td>${escapeHtml(row.key)}</td>${row.cells.map(c =>
+                c.varies
+                  ? `<td class="text-mono" style="background:rgba(255,200,50,0.12);color:#e6b800">${escapeHtml(c.vals.join(' / '))}</td>`
+                  : `<td class="text-mono">${escapeHtml(c.vals[0] ?? '—')}</td>`
+              ).join('')}</tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </details>`;
+  }
+
+  // Default: one column per auto-split series, color matches the corresponding chart bar.
+  return `
+    <details class="card">
+      <summary><h2>Compared LLM Settings</h2></summary>
+      ${settingsRows.length > 0 ? `
+      <div style="overflow-x:auto">
+        <table class="stats-table">
+          <thead><tr><th>Setting</th>${autoSeries.map(s => `<th style="border-top:3px solid ${seriesColor(s.key, s.modelId)}">${escapeHtml(s.label)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${settingsRows.map(row => `<tr><td>${escapeHtml(row.key)}</td>${row.values.map(v => `<td class="text-mono">${escapeHtml(v)}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ` : `<p class="text-muted">${autoSeries.length > 1 ? 'No bench-parameter or llama.cpp setting differences detected between the selected runs.' : 'No bench-parameter or llama.cpp settings captured for this run.'}</p>`}
+    </details>`;
 }
 
 /**
@@ -325,8 +435,12 @@ export function buildSettingImpactGroups(results: ResultRow[], runInfos: RunPara
  * "Cost" (token usage, turn counts, and a score-vs-tokens efficiency view).
  * Each (model, run parameters) combination becomes its own series so the
  * same model run with different settings shows up as separate bars/points.
+ *
+ * When viewMode is 'setting', the main charts are replaced by setting-impact
+ * charts that isolate the effect of one parameter across runs of the same model.
  */
-export function renderComparisonCharts(container: HTMLElement, results: ResultRow[], runInfos: RunParamInfo[], splitMode: SplitMode = 'auto', splitSettingKey?: string): void {
+export function renderComparisonCharts(container: HTMLElement, results: ResultRow[], runInfos: RunParamInfo[], viewMode: ViewMode = 'auto', settingKey?: string): void {
+  const splitMode: SplitMode = viewMode === 'setting' ? 'auto' : viewMode;
   const runInfoMap = new Map(runInfos.map(r => [r.runId, r]));
   const series = buildSeries(results, runInfoMap, splitMode);
 
@@ -336,26 +450,44 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
   }
 
   const hasRepeats = results.some(r => (r.repeatCount ?? 1) > 1);
-  const settingsRows = series.length > 1
-    ? buildSettingsDiff(series, runInfoMap)
-    : Object.entries(settingsOf(series[0], runInfoMap)).map(([key, value]) => ({ key, values: [value] }));
-  const impactGroups = splitSettingKey ? buildSettingImpactGroups(results, runInfos, splitSettingKey) : [];
+  // In 'model' mode expand to auto-split so the settings table shows each configuration;
+  // in all other modes the chart series already represent each configuration correctly.
+  const autoSeries = viewMode === 'model' ? buildSeries(results, runInfoMap, 'auto') : series;
+  const settingsRows = autoSeries.length > 1
+    ? buildSettingsDiff(autoSeries, runInfoMap)
+    : Object.entries(settingsOf(autoSeries[0], runInfoMap)).map(([key, value]) => ({ key, values: [value] }));
+  const impactGroups = (viewMode === 'setting' && settingKey) ? buildSettingImpactGroups(results, runInfos, settingKey) : [];
 
-  const mainHtml = `
-    <details class="card">
-      <summary><h2>Compared LLM Settings</h2></summary>
-      ${settingsRows.length > 0 ? `
-      ${series.length > 1 ? '<p class="text-muted">Settings that differ between the series below:</p>' : ''}
-      <div style="overflow-x:auto">
-        <table class="stats-table">
-          <thead><tr><th>Setting</th>${series.map(s => `<th>${escapeHtml(s.label)}</th>`).join('')}</tr></thead>
-          <tbody>
-            ${settingsRows.map(row => `<tr><td>${escapeHtml(row.key)}</td>${row.values.map(v => `<td class="text-mono">${escapeHtml(v)}</td>`).join('')}</tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      ` : `<p class="text-muted">${series.length > 1 ? 'No bench-parameter or llama.cpp setting differences detected between the selected series.' : 'No bench-parameter or llama.cpp settings captured for this series.'}</p>`}
-    </details>
+  // In 'setting' mode, replace main charts with impact group charts.
+  if (viewMode === 'setting') {
+    const settingsHtml = buildSettingsCardHtml(settingsRows, autoSeries, runInfoMap, viewMode, series);
+    if (!settingKey) {
+      container.innerHTML = settingsHtml + '<p class="text-muted">Select a setting to compare.</p>';
+      initCollapsibleCards(container);
+      return;
+    }
+    if (impactGroups.length === 0) {
+      container.innerHTML = settingsHtml + `
+        <details class="card" open>
+          <summary><h2>Setting Impact: ${escapeHtml(settingKey)}</h2></summary>
+          <p class="text-muted">No matching groups found for <strong>${escapeHtml(settingKey)}</strong>. Setting impact analysis requires the same model to have been run at least twice with different values for this setting.</p>
+        </details>`;
+      initCollapsibleCards(container);
+      return;
+    }
+    const impactHtml = `
+      <details class="card" open>
+        <summary><h2>Setting Impact: ${escapeHtml(settingKey)}</h2></summary>
+        <p class="text-muted">Charts below compare runs of the same model grouped by their <strong>${escapeHtml(settingKey)}</strong> value. Other differences between runs are shown in the Compared LLM Settings section above.</p>
+        ${impactGroups.map((g, gi) => renderImpactGroupHtml(g, gi, settingKey)).join('')}
+      </details>`;
+    container.innerHTML = settingsHtml + impactHtml;
+    initCollapsibleCards(container);
+    impactGroups.forEach((g, gi) => createImpactCharts(container, g, gi, settingKey));
+    return;
+  }
+
+  const mainHtml = buildSettingsCardHtml(settingsRows, autoSeries, runInfoMap, viewMode, series) + `
 
     <details class="card" open>
       <summary><h2>Performance</h2></summary>
@@ -390,20 +522,7 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
     ` : ''}
   `;
 
-  const impactHtml = splitSettingKey ? (impactGroups.length > 0 ? `
-    <details class="card" open>
-      <summary><h2>Setting Impact: ${escapeHtml(splitSettingKey)}</h2></summary>
-      <p class="text-muted">Each section below isolates the effect of "${escapeHtml(splitSettingKey)}" while holding the model and all other settings constant.</p>
-      ${impactGroups.map((g, gi) => renderImpactGroupHtml(g, gi, splitSettingKey)).join('')}
-    </details>
-  ` : `
-    <details class="card" open>
-      <summary><h2>Setting Impact: ${escapeHtml(splitSettingKey)}</h2></summary>
-      <p class="text-muted">No groups found where "${escapeHtml(splitSettingKey)}" varies while the model and all other settings stay constant.</p>
-    </details>
-  `) : '';
-
-  container.innerHTML = mainHtml + impactHtml;
+  container.innerHTML = mainHtml;
   initCollapsibleCards(container);
 
   const labels = series.map(s => s.label);
@@ -526,25 +645,13 @@ export function renderComparisonCharts(container: HTMLElement, results: ResultRo
     });
   }
 
-  if (splitSettingKey) {
-    impactGroups.forEach((g, gi) => createImpactCharts(container, g, gi, splitSettingKey));
-  }
 }
 
-/** Renders one "impact" sub-section: charts comparing values of `key` for a fixed model + other-settings context. */
+/** Renders one "impact" sub-section: charts comparing values of `key` for a fixed model. */
 function renderImpactGroupHtml(g: SettingImpactGroup, gi: number, key: string): string {
-  const contextEntries = Object.entries(g.contextSettings);
   return `
     <div class="card" style="background:var(--surface2)">
       <h3>${escapeHtml(shortModelName(g.modelId))}</h3>
-      ${contextEntries.length > 0 ? `
-      <p class="text-muted">Other settings held constant:</p>
-      <table class="stats-table">
-        <tbody>
-          ${contextEntries.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="text-mono">${escapeHtml(v)}</td></tr>`).join('')}
-        </tbody>
-      </table>
-      ` : ''}
       <div class="grid-2">
         <div class="chart-container"><h3>Average Score</h3><div class="chart-canvas-wrap"><canvas id="impact-${gi}-score"></canvas></div></div>
         <div class="chart-container"><h3>Average Speed (tokens/s)</h3><div class="chart-canvas-wrap"><canvas id="impact-${gi}-speed"></canvas></div></div>

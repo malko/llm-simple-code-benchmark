@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { ResultRow } from '../components/result-types.js';
-import { renderComparisonCharts, RunParamInfo, SplitMode, getDifferingSettingKeys } from '../components/comparison-charts.js';
+import { renderComparisonCharts, RunParamInfo, ViewMode, getImpactableSettingKeys } from '../components/comparison-charts.js';
 import { renderMarkdown, buildStandaloneHtml } from '../components/markdown.js';
 import { initCollapsibleCards } from '../components/collapsible-cards.js';
 
@@ -9,7 +9,7 @@ interface GraphState {
   runInfos: RunParamInfo[];
   excludedTests: Set<string>;
   excludedModels: Set<string>;
-  splitMode: SplitMode;
+  viewMode: ViewMode;
   splitSettingKey: string;
 }
 
@@ -54,21 +54,20 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
             <div class="selector-list" id="model-filter" style="max-height:200px"></div>
           </div>
           <div>
-            <h3>Group series by</h3>
-            <select id="split-mode-filter">
-              <option value="auto">Auto (split when settings differ)</option>
-              <option value="run">Always split by run</option>
-              <option value="model">Model only (merge across runs)</option>
+            <h3>View mode</h3>
+            <select id="view-mode-filter">
+              <option value="auto">Smart — split when settings differ</option>
+              <option value="model">By model — merge all runs</option>
+              <option value="run">By run — one series per run</option>
+              <option value="setting">Setting impact — compare a parameter</option>
             </select>
-            <p class="text-muted">Controls how runs of the same model are grouped into series in the charts below.</p>
+            <div id="setting-key-group" class="mt-1" style="display:none">
+              <h3>Setting to compare</h3>
+              <select id="setting-split-filter">
+                <option value="">Select a setting…</option>
+              </select>
+            </div>
           </div>
-        </div>
-        <div class="form-group mt-1">
-          <h3>Split charts by setting</h3>
-          <select id="setting-split-filter">
-            <option value="">None</option>
-          </select>
-          <p class="text-muted">When the selection contains different settings, isolate the impact of a single setting on a model: charts are grouped per model with all other settings held constant, varying only this setting.</p>
         </div>
       </details>
       <div id="charts-target"></div>
@@ -103,13 +102,15 @@ export async function renderResultsGraph(): Promise<HTMLElement> {
       runInfos: [],
       excludedTests: new Set(),
       excludedModels: new Set(),
-      splitMode: 'auto',
+      viewMode: 'auto',
       splitSettingKey: '',
     };
 
     container.querySelector('#run-selector')?.addEventListener('change', () => refreshResults(container, state));
-    container.querySelector('#split-mode-filter')?.addEventListener('change', (e) => {
-      state.splitMode = (e.target as HTMLSelectElement).value as SplitMode;
+    container.querySelector('#view-mode-filter')?.addEventListener('change', (e) => {
+      state.viewMode = (e.target as HTMLSelectElement).value as ViewMode;
+      const keyGroup = container.querySelector('#setting-key-group') as HTMLElement | null;
+      if (keyGroup) keyGroup.style.display = state.viewMode === 'setting' ? '' : 'none';
       applyFilters(container, state);
     });
     container.querySelector('#setting-split-filter')?.addEventListener('change', (e) => {
@@ -226,7 +227,7 @@ function renderFilters(container: HTMLElement, state: GraphState): void {
 
   const settingSplitFilter = container.querySelector('#setting-split-filter') as HTMLSelectElement | null;
   if (settingSplitFilter) {
-    const keys = getDifferingSettingKeys(state.allResults, state.runInfos);
+    const keys = getImpactableSettingKeys(state.allResults, state.runInfos);
     settingSplitFilter.innerHTML = '<option value="">None</option>'
       + keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
     if (keys.includes(state.splitSettingKey)) {
@@ -251,7 +252,7 @@ function applyFilters(container: HTMLElement, state: GraphState): void {
     return;
   }
 
-  renderComparisonCharts(target, filtered, state.runInfos, state.splitMode, state.splitSettingKey || undefined);
+  renderComparisonCharts(target, filtered, state.runInfos, state.viewMode, state.splitSettingKey || undefined);
 }
 
 function setupAnalysisSection(container: HTMLElement, state: GraphState): void {
@@ -303,7 +304,7 @@ function setupAnalysisSection(container: HTMLElement, state: GraphState): void {
         runIds,
         excludedTests: Array.from(state.excludedTests),
         excludedModels: Array.from(state.excludedModels),
-        splitMode: state.splitMode,
+        splitMode: state.viewMode === 'setting' ? 'auto' : state.viewMode,
         splitSettingKey: state.splitSettingKey || undefined,
       });
       lastReport = report;
